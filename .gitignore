@@ -4,3 +4,13 @@ target
 # Local settings
 .soroban
 .stellar
+
+# Node dependencies
+node_modules
+frontend/node_modules
+backend/node_modules
+
+# Environment files
+*.env
+frontend/.env.local
+backend/.env

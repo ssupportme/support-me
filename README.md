@@ -1,41 +1,49 @@
 # SupportMe
 
-A static, shareable donation page built on the Stellar blockchain testnet. Allow individuals to receive XLM tips from supporters via a public URL. 
+SupportMe is a creator tipping and donation platform built for easy open source contribution. The current architecture emphasizes a frontend user experience with a backend API layer for creator profiles and donation tracking.
 
-## Screenshot
+## What changed
 
-![Wallet Connected](frontend/public/walletconnected.png)
-![Transaction Success](frontend/public/transaction_succesful.png)
+- Added a basic backend API in `backend/`
+- Added database schema support with Prisma and PostgreSQL
+- Created architecture documentation in `docs/architecture.md`
+- Added a contributor guide in `CONTRIBUTING.md`
+- Updated the roadmap to remove any required smart contract dependency for the current build
+- Follow the updated PRD `PRD(v2).md`
 
 ## Features
 
-- **Wallet Integration**: Connect Freighter wallet for seamless donations
-- **Real-time Feedback**: Transaction success/failure notifications with hashes
-- **Dashboard**: Track incoming donations (planned)
-- **Stellar Testnet**: Safe, fast, low-cost transactions
-- **Responsive Design**: Mobile-friendly UI w
+- **Wallet Integration**: Connect Freighter wallet for Stellar payments
+- **Creator Profiles**: Public creator pages with shareable usernames
+- **Donation Tracking**: Backend-stored donation history
+- **Dashboard Support**: API endpoints for reports and analytics
+- **Open Source Ready**: Contributor-friendly backend and documentation
 
 ## Tech Stack
 
-- **Frontend**: Next.js 16, React 19, TypeScript, Tailwind CSS
-- **Blockchain**: Stellar SDK, Soroban smart contracts
-- **Wallet**: Freighter API
-- **Backend**: None (static page)
-- **Smart Contracts**: Rust (Soroban)
+- **Frontend**: Next.js, React, TypeScript
+- **Backend**: Node.js, Express, Prisma
+- **Database**: PostgreSQL
+- **Wallet**: Stellar / Freighter
 
 ## Project Structure
 
 ```
 .
-├── contracts/              # Soroban smart contracts (Rust)
-│   └── hello-world/        # Example contract
+├── backend/                # Express API and Prisma schema
+│   ├── prisma/
+│   ├── src/
+│   └── .env.example
+├── contracts/              # Legacy smart contract examples (not required)
+├── docs/                   # Architecture and contribution docs
 ├── frontend/               # Next.js application
-│   ├── app/                # Next.js app directory
-│   ├── components/         # React components
-│   ├── lib/                # Utility libraries
-│   └── types/              # TypeScript types
-├── PRD.md                  # Product Requirements Document
-└── README.md               
+│   ├── app/
+│   ├── components/
+│   ├── lib/
+│   └── types/
+├── PRD(v2).md              # Product requirements document
+├── CONTRIBUTING.md         # Contribution guide
+└── README.md
 ```
 
 ## Installation
@@ -43,78 +51,52 @@ A static, shareable donation page built on the Stellar blockchain testnet. Allow
 ### Prerequisites
 
 - Node.js 18+
-- Rust (for smart contracts)
-- Freighter wallet extension
+- PostgreSQL
+- Freighter wallet extension for Stellar interaction
 
-### Setup
+### Backend Setup
 
-1. **Clone the repository:**
-   ```bash
-   git clone <repository-url>
-   cd support-me
-   ```
+```bash
+cd backend
+npm install
+cp .env.example .env
+# update DATABASE_URL in .env
+npm run prisma:generate
+npm run dev
+```
 
-2. **Install frontend dependencies:**
-   ```bash
-   cd frontend
-   npm install
-   ```
-
-3. **Build smart contracts (optional):**
-   ```bash
-   cd ..
-   cargo build --release
-   ```
-
-4. **Environment setup:**
-   Create `.env.local` in `frontend/`:
-   ```
-   NEXT_PUBLIC_STELLAR_NETWORK=TESTNET
-   NEXT_PUBLIC_HORIZON_URL=https://horizon-testnet.stellar.org
-   NEXT_PUBLIC_NETWORK_PASSPHRASE=Test SDF Network ; September 2015
-   ```
-
-## Usage
-
-### Development
-
-1. **Start the development server:**
-   ```bash
-   cd frontend
-   npm run dev
-   ```
-
-2. **Open [http://localhost:3000](http://localhost:3000)**
-
-### Building for Production
+### Frontend Setup
 
 ```bash
 cd frontend
-npm run build
-npm start
+npm install
+# create frontend/.env.local with your environment variables
+npm run dev
 ```
 
-### Connecting Wallet
+### Recommended Environment Variables
 
-- Click "Connect Wallet" to link your Freighter wallet
-- Ensure you're on Stellar Testnet
-- Send donations with optional messages
+In `frontend/.env.local`:
 
-## Design Tokens
+```env
+NEXT_PUBLIC_STELLAR_NETWORK=TESTNET
+NEXT_PUBLIC_HORIZON_URL=https://horizon-testnet.stellar.org
+NEXT_PUBLIC_NETWORK_PASSPHRASE=Test SDF Network ; September 2015
+```
 
-| Token | Value |
-|---|---|
-| Primary Accent | `#6366F1` |
-| Background | `#FFFFFF` |
-| Card | `#F8F9FB` |
-| Text | `#1F2937` |
-| Border | `#E5E7EB` |
+## Usage
+
+- Start the backend: `cd backend && npm run dev`
+- Start the frontend: `cd frontend && npm run dev`
+- Backend health endpoint: `http://localhost:4000/health`
+
+## Documentation
+
+- Architecture flow: `docs/architecture.md`
+- Backend API guide: `backend/README.md`
+- Contribution guide: `CONTRIBUTING.md`
 
 ## Contributing
 
-1. Fork the repository
-2. Create a feature branch
-3. Make your changes
-4. Run tests and linting
-5. Submit a pull request
+Please see `CONTRIBUTING.md` for guidelines on making changes, opening issues, and submitting pull requests.
 
