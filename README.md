@@ -34,7 +34,7 @@ SupportMe is a creator tipping and donation platform built for easy open source 
 │   ├── prisma/
 │   ├── src/
 │   └── .env.example
-├── contracts/              # Legacy smart contract examples (not required)
+├── contracts/              # smart contract for automation
 ├── docs/                   # Architecture and contribution docs
 ├── frontend/               # Next.js application
 │   ├── app/
