@@ -26,40 +26,6 @@ router.get("/:username", async (req, res) => {
   return res.json(creator);
 });
 
-router.post("/", async (req, res) => {
-  const {
-    username,
-    walletAddress,
-    displayName,
-    bio,
-    avatarUrl,
-    socialLinks,
-    donationGoal
-  } = req.body;
-
-  if (!username || !walletAddress) {
-    return res.status(400).json({ error: "username and walletAddress are required" });
-  }
-
-  const existing = await prisma.creator.findUnique({ where: { username } });
-  if (existing) {
-    return res.status(409).json({ error: "Username already exists" });
-  }
-
-  const creator = await prisma.creator.create({
-    data: {
-      username,
-      walletAddress,
-      displayName,
-      bio,
-      avatarUrl,
-      socialLinks,
-      donationGoal
-    }
-  });
-
-  return res.status(201).json(creator);
-});
 
 router.post("/:username/create", authMiddleware as any, async (req: AuthRequest, res) => {
   const { username } = req.params;

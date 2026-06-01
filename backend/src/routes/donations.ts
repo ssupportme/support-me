@@ -6,13 +6,11 @@ const router = Router();
 router.get("/", async (req, res) => {
   const { creatorUsername } = req.query;
 
-  const filter = creatorUsername
-    ? { where: { creator: { username: String(creatorUsername) } } }
-    : {};
-
   const donations = await prisma.donation.findMany({
-    ...filter,
-    orderBy: { createdAt: "desc" }
+    orderBy: { createdAt: "desc" },
+    ...(creatorUsername
+      ? { where: { creator: { username: String(creatorUsername) } } }
+      : {})
   });
 
   return res.json(donations);
