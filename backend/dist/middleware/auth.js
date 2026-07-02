@@ -50,7 +50,7 @@ const authMiddleware = (req, res, next) => {
     }
 };
 exports.authMiddleware = authMiddleware;
-const generateToken = (userId, email) => {
-    return jwt.sign({ id: userId, email }, process.env.JWT_SECRET || 'your-secret-key', { expiresIn: '7d' });
+const generateToken = (userId, walletAddress) => {
+    return jwt.sign({ id: userId, walletAddress }, process.env.JWT_SECRET || 'your-secret-key', { expiresIn: '7d' });
 };
 exports.generateToken = generateToken;

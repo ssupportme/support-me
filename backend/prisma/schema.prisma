@@ -9,8 +9,7 @@ datasource db {
 
 model User {
   id            Int       @id @default(autoincrement())
-  email         String    @unique
-  passwordHash  String
+  walletAddress String    @unique
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
   creator       Creator?

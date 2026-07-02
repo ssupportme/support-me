@@ -4,7 +4,7 @@ import * as jwt from 'jsonwebtoken';
 export interface AuthRequest extends Request {
   user?: {
     id: number;
-    email: string;
+    walletAddress: string;
   };
 }
 
@@ -18,7 +18,7 @@ export const authMiddleware = (req: AuthRequest, res: Response, next: NextFuncti
   try {
     const decoded = jwt.verify(token, process.env.JWT_SECRET || 'your-secret-key') as {
       id: number;
-      email: string;
+      walletAddress: string;
     };
     req.user = decoded;
     next();
@@ -27,9 +27,9 @@ export const authMiddleware = (req: AuthRequest, res: Response, next: NextFuncti
   }
 };
 
-export const generateToken = (userId: number, email: string): string => {
+export const generateToken = (userId: number, walletAddress: string): string => {
   return jwt.sign(
-    { id: userId, email },
+    { id: userId, walletAddress },
     process.env.JWT_SECRET || 'your-secret-key',
     { expiresIn: '7d' }
   );

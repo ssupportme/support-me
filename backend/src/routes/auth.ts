@@ -1,62 +1,84 @@
 import { Router } from 'express';
-import { hash, compare } from 'bcryptjs';
+import { randomBytes, createHash } from 'crypto';
+import { Keypair, StrKey } from '@stellar/stellar-sdk';
 import prisma from '../prisma';
 import { generateToken } from '../middleware/auth';
 
 const router = Router();
 
-router.post('/signup', async (req, res) => {
-  const { email, password } = req.body;
+const STELLAR_SIGNED_MESSAGE_PREFIX = 'Stellar Signed Message:\n';
+const CHALLENGE_TTL_MS = 5 * 60 * 1000;
 
-  if (!email || !password) {
-    return res.status(400).json({ error: 'Email and password are required' });
+interface Challenge {
+  message: string;
+  expiresAt: number;
+}
+
+const challenges = new Map<string, Challenge>();
+
+router.post('/challenge', async (req, res) => {
+  const { walletAddress } = req.body;
+
+  if (!walletAddress || !StrKey.isValidEd25519PublicKey(walletAddress)) {
+    return res.status(400).json({ error: 'A valid Stellar wallet address is required' });
   }
 
-  try {
-    const existing = await prisma.user.findUnique({ where: { email } });
-    if (existing) {
-      return res.status(409).json({ error: 'Email already registered' });
-    }
+  const nonce = randomBytes(16).toString('hex');
+  const message = `Sign in to SupportMe\n\nAddress: ${walletAddress}\nNonce: ${nonce}\nIssued At: ${new Date().toISOString()}`;
 
-    const passwordHash = await hash(password, 10);
-    const user = await prisma.user.create({
-      data: {
-        email,
-        passwordHash,
-      },
-    });
+  challenges.set(walletAddress, { message, expiresAt: Date.now() + CHALLENGE_TTL_MS });
 
-    const token = generateToken(user.id, user.email);
-    return res.status(201).json({ user: { id: user.id, email: user.email }, token });
-  } catch (error) {
-    console.error('Signup error:', error);
-    return res.status(500).json({ error: 'Signup failed' });
-  }
+  return res.json({ message });
 });
 
-router.post('/login', async (req, res) => {
-  const { email, password } = req.body;
+router.post('/verify', async (req, res) => {
+  const { walletAddress, signedMessage } = req.body;
 
-  if (!email || !password) {
-    return res.status(400).json({ error: 'Email and password are required' });
+  if (!walletAddress || !signedMessage) {
+    return res.status(400).json({ error: 'walletAddress and signedMessage are required' });
+  }
+
+  const challenge = challenges.get(walletAddress);
+  if (!challenge || challenge.expiresAt < Date.now()) {
+    challenges.delete(walletAddress);
+    return res.status(401).json({ error: 'Challenge expired or not found, please try again' });
   }
 
   try {
-    const user = await prisma.user.findUnique({ where: { email } });
-    if (!user) {
-      return res.status(401).json({ error: 'Invalid email or password' });
+    const payload = Buffer.concat([
+      Buffer.from(STELLAR_SIGNED_MESSAGE_PREFIX, 'utf-8'),
+      Buffer.from(challenge.message, 'utf-8'),
+    ]);
+    const hash = createHash('sha256').update(payload).digest();
+    const signatureValid = Keypair.fromPublicKey(walletAddress).verify(
+      hash,
+      Buffer.from(signedMessage, 'base64')
+    );
+
+    if (!signatureValid) {
+      return res.status(401).json({ error: 'Invalid signature' });
     }
 
-    const passwordMatch = await compare(password, user.passwordHash);
-    if (!passwordMatch) {
-      return res.status(401).json({ error: 'Invalid email or password' });
-    }
+    challenges.delete(walletAddress);
 
-    const token = generateToken(user.id, user.email);
-    return res.json({ user: { id: user.id, email: user.email }, token });
+    const user = await prisma.user.upsert({
+      where: { walletAddress },
+      update: {},
+      create: { walletAddress },
+    });
+
+    const creator = await prisma.creator.findUnique({ where: { userId: user.id } });
+
+    const token = generateToken(user.id, user.walletAddress);
+    return res.json({
+      user: { id: user.id, walletAddress: user.walletAddress },
+      token,
+      hasProfile: !!creator,
+      username: creator?.username,
+    });
   } catch (error) {
-    console.error('Login error:', error);
-    return res.status(500).json({ error: 'Login failed' });
+    console.error('Verify error:', error);
+    return res.status(401).json({ error: 'Signature verification failed' });
   }
 });
 
