@@ -48,4 +48,15 @@ const signTransaction = async (xdr, address) => {
   });
 };
 
-export { connectWallet, disconnectWallet, signTransaction };
+// Signs an arbitrary text message (used for the wallet sign-in challenge).
+// Returns the base64-encoded signed message.
+const signMessage = async (message, address) => {
+  ensureInit();
+  const { signedMessage } = await StellarWalletsKit.signMessage(message, {
+    address,
+    networkPassphrase: NETWORK_PASSPHRASE,
+  });
+  return signedMessage;
+};
+
+export { connectWallet, disconnectWallet, signTransaction, signMessage };

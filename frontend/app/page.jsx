@@ -2,11 +2,15 @@
 
 import { useState, useEffect } from 'react'
 import Link from 'next/link'
+import { useRouter } from 'next/navigation'
 import { useAuth } from '@/context/AuthContext'
 
 export default function Home() {
   const [scrolled, setScrolled] = useState(false)
-  const { user, logout } = useAuth()
+  const [connecting, setConnecting] = useState(false)
+  const [error, setError] = useState('')
+  const { user, logout, loginWithWallet } = useAuth()
+  const router = useRouter()
 
   useEffect(() => {
     const handleScroll = () => {
@@ -16,13 +20,26 @@ export default function Home() {
     return () => window.removeEventListener('scroll', handleScroll)
   }, [])
 
+  const handleConnectWallet = async () => {
+    setConnecting(true)
+    setError('')
+    try {
+      const { hasProfile } = await loginWithWallet()
+      router.push(hasProfile ? '/dashboard' : '/auth/username')
+    } catch (err) {
+      setError(err.message)
+    } finally {
+      setConnecting(false)
+    }
+  }
+
   return (
     <div className="min-h-screen bg-gradient-to-b from-white via-blue-50 to-white">
       {/* Navigation */}
       <nav className={`fixed w-full z-50 transition-all duration-300 ${scrolled ? 'bg-white shadow-md' : 'bg-transparent'}`}>
         <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-4 flex justify-between items-center">
           <div className="text-2xl font-bold text-indigo-600">SupportMe</div>
-          <div className="space-x-6">
+          <div className="space-x-6 flex items-center">
             <a href="#features" className="text-gray-600 hover:text-indigo-600 transition">Features</a>
             <a href="#how-it-works" className="text-gray-600 hover:text-indigo-600 transition">How it Works</a>
             {user ? (
@@ -41,14 +58,13 @@ export default function Home() {
                 </button>
               </>
             ) : (
-              <>
-                <Link href="/auth/login" className="text-gray-600 hover:text-indigo-600 transition">
-                  Sign In
-                </Link>
-                <Link href="/auth/signup" className="bg-indigo-600 text-white px-6 py-2 rounded-lg hover:bg-indigo-700 transition">
-                  Get Started
-                </Link>
-              </>
+              <button
+                onClick={handleConnectWallet}
+                disabled={connecting}
+                className="bg-indigo-600 text-white px-6 py-2 rounded-lg hover:bg-indigo-700 disabled:opacity-60 transition"
+              >
+                {connecting ? 'Connecting...' : 'Connect Wallet'}
+              </button>
             )}
           </div>
         </div>
@@ -66,6 +82,11 @@ export default function Home() {
           <p className="text-xl sm:text-2xl text-gray-600 mb-8 leading-relaxed">
             A decentralized tipping platform built on Stellar blockchain. Send XLM donations directly to creators you love—no intermediaries, no fees.
           </p>
+          {error && (
+            <div className="max-w-md mx-auto bg-red-50 border border-red-200 rounded-lg p-3 mb-6 text-sm text-red-700">
+              {error}
+            </div>
+          )}
           <div className="flex flex-col sm:flex-row gap-4 justify-center">
             {user ? (
               <Link href="/dashboard" className="bg-indigo-600 text-white px-8 py-4 rounded-lg font-semibold hover:bg-indigo-700 transition text-lg">
@@ -73,9 +94,13 @@ export default function Home() {
               </Link>
             ) : (
               <>
-                <Link href="/auth/signup" className="bg-indigo-600 text-white px-8 py-4 rounded-lg font-semibold hover:bg-indigo-700 transition text-lg">
-                  Become a Creator
-                </Link>
+                <button
+                  onClick={handleConnectWallet}
+                  disabled={connecting}
+                  className="bg-indigo-600 text-white px-8 py-4 rounded-lg font-semibold hover:bg-indigo-700 disabled:opacity-60 transition text-lg"
+                >
+                  {connecting ? 'Connecting...' : 'Become a Creator'}
+                </button>
                 <a href="#features" className="border-2 border-indigo-600 text-indigo-600 px-8 py-4 rounded-lg font-semibold hover:bg-indigo-50 transition text-lg">
                   Learn More
                 </a>
@@ -155,15 +180,15 @@ export default function Home() {
             <div className="flex gap-6">
               <div className="flex-shrink-0 w-12 h-12 bg-indigo-600 text-white rounded-full flex items-center justify-center font-bold text-lg">1</div>
               <div>
-                <h3 className="text-2xl font-bold text-gray-900 mb-2">Sign Up & Create Profile</h3>
-                <p className="text-gray-600">Create an account with email and password, then choose a unique username for your public profile.</p>
+                <h3 className="text-2xl font-bold text-gray-900 mb-2">Connect Your Wallet & Create Profile</h3>
+                <p className="text-gray-600">Connect your Stellar wallet and sign a message to prove ownership, then choose a unique username for your public profile.</p>
               </div>
             </div>
             <div className="flex gap-6">
               <div className="flex-shrink-0 w-12 h-12 bg-indigo-600 text-white rounded-full flex items-center justify-center font-bold text-lg">2</div>
               <div>
-                <h3 className="text-2xl font-bold text-gray-900 mb-2">Connect Freighter Wallet</h3>
-                <p className="text-gray-600">In your settings, connect your Freighter wallet to receive tips. Secure, simple, and self-custodial.</p>
+                <h3 className="text-2xl font-bold text-gray-900 mb-2">Set Your Payout Wallet</h3>
+                <p className="text-gray-600">In your settings, connect the wallet (Freighter, xBull, Albedo, Rabet, or Lobstr) you want to receive tips on. Secure, simple, and self-custodial.</p>
               </div>
             </div>
             <div className="flex gap-6">
@@ -214,9 +239,13 @@ export default function Home() {
               Go to Dashboard →
             </Link>
           ) : (
-            <Link href="/auth/signup" className="bg-white text-indigo-600 px-8 py-4 rounded-lg font-semibold hover:bg-gray-100 transition text-lg inline-block">
-              Get Started Now →
-            </Link>
+            <button
+              onClick={handleConnectWallet}
+              disabled={connecting}
+              className="bg-white text-indigo-600 px-8 py-4 rounded-lg font-semibold hover:bg-gray-100 disabled:opacity-60 transition text-lg inline-block"
+            >
+              {connecting ? 'Connecting...' : 'Get Started Now →'}
+            </button>
           )}
         </div>
       </section>
@@ -262,4 +291,3 @@ export default function Home() {
     </div>
   )
 }
-

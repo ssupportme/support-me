@@ -1,18 +1,25 @@
 'use client';
 
 import { createContext, useContext, useState, useEffect, ReactNode } from 'react';
+import { connectWallet, disconnectWallet, signMessage } from '@/lib/wallet';
 
 interface User {
   id: number;
-  email: string;
+  walletAddress: string;
+}
+
+interface LoginResult {
+  user: User;
+  token: string;
+  hasProfile: boolean;
+  username?: string;
 }
 
 interface AuthContextType {
   user: User | null;
   token: string | null;
   loading: boolean;
-  signup: (email: string, password: string) => Promise<{ user: User; token: string }>;
-  login: (email: string, password: string) => Promise<{ user: User; token: string }>;
+  loginWithWallet: () => Promise<LoginResult>;
   logout: () => void;
 }
 
@@ -33,35 +40,33 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setLoading(false);
   }, []);
 
-  const signup = async (email: string, password: string) => {
-    const res = await fetch('http://localhost:4000/api/auth/signup', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email, password }),
-    });
-    if (!res.ok) {
-      const error = await res.json();
-      throw new Error(error.error || 'Signup failed');
-    }
-    const data = await res.json();
-    setToken(data.token);
-    setUser(data.user);
-    localStorage.setItem('authToken', data.token);
-    localStorage.setItem('authUser', JSON.stringify(data.user));
-    return data;
-  };
+  const loginWithWallet = async (): Promise<LoginResult> => {
+    const address = await connectWallet();
 
-  const login = async (email: string, password: string) => {
-    const res = await fetch('http://localhost:4000/api/auth/login', {
+    const challengeRes = await fetch('http://localhost:4000/api/auth/challenge', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email, password }),
+      body: JSON.stringify({ walletAddress: address }),
     });
-    if (!res.ok) {
-      const error = await res.json();
-      throw new Error(error.error || 'Login failed');
+    if (!challengeRes.ok) {
+      const error = await challengeRes.json();
+      throw new Error(error.error || 'Failed to start sign-in challenge');
     }
-    const data = await res.json();
+    const { message } = await challengeRes.json();
+
+    const signedMessage = await signMessage(message, address);
+
+    const verifyRes = await fetch('http://localhost:4000/api/auth/verify', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ walletAddress: address, signedMessage }),
+    });
+    if (!verifyRes.ok) {
+      const error = await verifyRes.json();
+      throw new Error(error.error || 'Sign-in verification failed');
+    }
+    const data: LoginResult = await verifyRes.json();
+
     setToken(data.token);
     setUser(data.user);
     localStorage.setItem('authToken', data.token);
@@ -74,10 +79,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setToken(null);
     localStorage.removeItem('authToken');
     localStorage.removeItem('authUser');
+    disconnectWallet().catch(() => {});
   };
 
   return (
-    <AuthContext.Provider value={{ user, token, loading, signup, login, logout }}>
+    <AuthContext.Provider value={{ user, token, loading, loginWithWallet, logout }}>
       {children}
     </AuthContext.Provider>
   );

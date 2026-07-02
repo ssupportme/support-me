@@ -10,7 +10,7 @@ export default function CreateUsernamePage() {
   const [displayName, setDisplayName] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
-  const { token } = useAuth();
+  const { token, user } = useAuth();
   const router = useRouter();
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -43,7 +43,7 @@ export default function CreateUsernamePage() {
             'Authorization': `Bearer ${token}`,
           },
           body: JSON.stringify({
-            walletAddress: '',
+            walletAddress: user?.walletAddress || '',
             displayName: displayName || username,
           }),
         }
