@@ -6,12 +6,28 @@ SupportMe is a creator tipping and donation platform. This enables creators on S
 
 [https://support-me-tawny.vercel.app/](https://support-me-tawny.vercel.app/)
 
+## Smart Contract (Stellar Testnet)
+
+Donations are recorded on-chain via a Soroban contract that also moves the
+donated XLM from donor to creator (single transaction).
+
+- **Contract address**: [`CABIRZDB6LC5KYWUTROICM2GNJMNEU6SM2ACOTIM2V3EIQLQRPJG7XLF`](https://stellar.expert/explorer/testnet/contract/CABIRZDB6LC5KYWUTROICM2GNJMNEU6SM2ACOTIM2V3EIQLQRPJG7XLF)
+- **Example transaction** (CLI-verified `donate` call, transfers 1 XLM and emits a `donated` event): [`27c31f388f95403b321ccf0daa503b3cfdff5c08b4a259bfdd77ef5ea73de266`](https://stellar.expert/explorer/testnet/tx/27c31f388f95403b321ccf0daa503b3cfdff5c08b4a259bfdd77ef5ea73de266)
+- **Source**: [`contracts/donation/src/lib.rs`](contracts/donation/src/lib.rs)
+- **Network**: Stellar Testnet, RPC `https://soroban-testnet.stellar.org`
+
+The frontend calls this contract directly from `frontend/lib/contract.js`
+(simulate → sign → submit → poll for confirmation), with live transaction
+status shown on the donation page and errors categorized as wallet,
+simulation, or network failures.
+
 ## What's New (v2)
 
 - **User Authentication**: Email/password signup and login with JWT tokens
 - **Creator Profiles**: Each user creates a unique username (e.g., `supportme.app/sammie`) with a public profile
 - **Dashboard**: Track donations, earnings, and supporter statistics
-- **Wallet Connection**: Connect Stellar wallet via Freighter to receive tips
+- **Multi-Wallet Connection**: Connect Freighter, xBull, Albedo, Rabet, or Lobstr to send or receive tips
+- **On-Chain Donations**: Donations call a deployed Soroban contract that transfers XLM and records the donation on-chain
 - **Dynamic Donations**: Support any creator on the platform through their unique profile URL
 - **Settings Page**: Update profile information and connect/update wallet address
 
@@ -19,7 +35,8 @@ SupportMe is a creator tipping and donation platform. This enables creators on S
 
 - **User Authentication**: Secure signup/login with email and password
 - **Creator Profiles**: Public, shareable creator pages with unique usernames
-- **Wallet Integration**: Connect Freighter wallet for Stellar payments
+- **Multi-Wallet Integration**: Connect Freighter, xBull, Albedo, Rabet, or Lobstr via Stellar Wallets Kit
+- **On-Chain Contract Calls**: Donations are settled and recorded through a deployed Soroban contract
 - **Donation Tracking**: Backend-stored donation history with stats
 - **Creator Dashboard**: Real-time analytics and recent supporter feed
 - **Zero Fees**: 100% of donations go directly to creators
@@ -30,7 +47,8 @@ SupportMe is a creator tipping and donation platform. This enables creators on S
 - **Frontend**: Next.js, React, TypeScript, Tailwind CSS
 - **Backend**: Node.js, Express, Prisma
 - **Database**: PostgreSQL
-- **Wallet**: Stellar SDK / Freighter
+- **Smart Contract**: Soroban (Rust), deployed to Stellar Testnet
+- **Wallet**: Stellar SDK + Stellar Wallets Kit (Freighter, xBull, Albedo, Rabet, Lobstr)
 - **Auth**: JWT tokens, bcryptjs for password hashing
 
 ## Project Structure
@@ -68,7 +86,8 @@ SupportMe is a creator tipping and donation platform. This enables creators on S
 │   ├── context/
 │   │   └── AuthContext.tsx     # Global auth state
 │   ├── lib/
-│   │   └── freighter.js        # Wallet integration
+│   │   ├── wallet.js           # Multi-wallet connection (Stellar Wallets Kit)
+│   │   └── contract.js         # Soroban donation contract calls
 │   └── package.json
 ├── docs/                       # Architecture documentation
 ├── PRD(v2).md                  # Product requirements
@@ -87,7 +106,7 @@ SupportMe is a creator tipping and donation platform. This enables creators on S
    ↓
 3. Land in Dashboard
    ↓
-4. Go to Settings → Connect Wallet (Freighter)
+4. Go to Settings → Connect Wallet (Freighter, xBull, Albedo, Rabet, or Lobstr)
    ↓
 5. Profile is live at /[username]
    ↓
@@ -103,11 +122,11 @@ SupportMe is a creator tipping and donation platform. This enables creators on S
    ↓
 2. See creator info and recent donations
    ↓
-3. Connect wallet (Freighter) to send donation
+3. Connect a Stellar wallet (Freighter, xBull, Albedo, Rabet, or Lobstr)
    ↓
 4. Choose donation amount + optional message
    ↓
-5. Sign and send XLM transaction
+5. Sign the on-chain `donate` contract call (live status shown)
    ↓
 6. Donation appears on creator's dashboard
 ```
@@ -118,7 +137,7 @@ SupportMe is a creator tipping and donation platform. This enables creators on S
 
 - Node.js 18+
 - PostgreSQL
-- Freighter wallet extension for Stellar (browser extension)
+- A Stellar wallet browser extension (Freighter, xBull, Albedo, Rabet, or Lobstr)
 
 ### Backend Setup
 
@@ -211,7 +230,10 @@ NODE_ENV=development
 
 ### Frontend (.env.local)
 
-No environment variables required for local development. For production deployment, configure your API URL.
+```env
+NEXT_PUBLIC_DONATION_CONTRACT_ID=CABIRZDB6LC5KYWUTROICM2GNJMNEU6SM2ACOTIM2V3EIQLQRPJG7XLF
+NEXT_PUBLIC_SOROBAN_RPC_URL=https://soroban-testnet.stellar.org
+```
 
 ## Development Workflow
 
@@ -232,9 +254,9 @@ Visit `http://localhost:3000` in your browser.
 1. **Sign Up**: Go to `/auth/signup`, create account with email/password
 2. **Create Username**: Redirected to `/auth/username`, choose a unique username
 3. **Dashboard**: Land in `/dashboard` - see stats and profile link
-4. **Connect Wallet**: Go to `/settings`, click "Connect Freighter", approve in wallet
+4. **Connect Wallet**: Go to `/settings`, click "Connect Wallet", pick a wallet, approve
 5. **Share Link**: Copy your profile URL from dashboard
-6. **Send Donation**: Visit your profile URL, connect wallet as supporter, send XLM
+6. **Send Donation**: Visit your profile URL, connect a wallet as supporter, sign the `donate` contract call
 
 ## Database Models
 
@@ -285,7 +307,7 @@ npm run build
 - Passwords are hashed with bcryptjs (10 salt rounds)
 - All sensitive routes require valid JWT token
 - CORS is enabled for development (configure for production)
-- Stellar transactions are signed client-side via Freighter
+- Stellar transactions are signed client-side via the connected wallet (Stellar Wallets Kit)
 
 ## Contributing
 
