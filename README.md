@@ -4,14 +4,15 @@ SupportMe is a creator tipping and donation platform. This enables creators on S
 
 ## Live Demo
 
-[https://support-me-tawny.vercel.app/](https://support-me-tawny.vercel.app/)
+[https://support-mee.vercel.app/](https://support-mee.vercel.app/)
 
 ## Smart Contract (Stellar Testnet)
 
 Donations are recorded on-chain via a Soroban contract that also moves the
-donated XLM from donor to creator (single transaction).
+donated XLM from donor to creator in a single transaction.
 
 - **Contract address**: [`CABIRZDB6LC5KYWUTROICM2GNJMNEU6SM2ACOTIM2V3EIQLQRPJG7XLF`](https://stellar.expert/explorer/testnet/contract/CABIRZDB6LC5KYWUTROICM2GNJMNEU6SM2ACOTIM2V3EIQLQRPJG7XLF)
+
 - **Example transaction** (CLI-verified `donate` call, transfers 1 XLM and emits a `donated` event): [`27c31f388f95403b321ccf0daa503b3cfdff5c08b4a259bfdd77ef5ea73de266`](https://stellar.expert/explorer/testnet/tx/27c31f388f95403b321ccf0daa503b3cfdff5c08b4a259bfdd77ef5ea73de266)
 - **Source**: [`contracts/donation/src/lib.rs`](contracts/donation/src/lib.rs)
 - **Network**: Stellar Testnet, RPC `https://soroban-testnet.stellar.org`
@@ -24,7 +25,7 @@ simulation, or network failures.
 ## What's New (v2)
 
 - **Wallet Sign-In**: Connect a Stellar wallet and sign a challenge message to log in (no email/password) — JWT issued after signature verification
-- **Creator Profiles**: Each user creates a unique username (e.g., `supportme.app/sammie`) with a public profile
+- **Creator Profiles**: Each user creates a unique username (e.g., `https://support-mee.vercel.app/sammie`) with a public profile
 - **Dashboard**: Track donations, earnings, and supporter statistics
 - **Multi-Wallet Connection**: Connect Freighter, xBull, Albedo, Rabet, or Lobstr to send or receive tips
 - **On-Chain Donations**: Donations call a deployed Soroban contract that transfers XLM and records the donation on-chain

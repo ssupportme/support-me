@@ -92,7 +92,7 @@ export default function CreateUsernamePage() {
                     value={username}
                     onChange={(e) => setUsername(e.target.value.toLowerCase())}
                     placeholder="yourname"
-                    className="flex-1 px-4 py-2.5 border border-l-0 border-gray-300 rounded-r-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent outline-none transition"
+                    className="flex-1 px-4 py-2.5 border border-l-0 border-gray-300 rounded-r-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent outline-none transition text-black"
                   />
                 </div>
                 <p className="text-xs text-gray-500 mt-2">
@@ -109,7 +109,7 @@ export default function CreateUsernamePage() {
                   value={displayName}
                   onChange={(e) => setDisplayName(e.target.value)}
                   placeholder="Your Name"
-                  className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent outline-none transition"
+                  className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent outline-none transition text-black"
                 />
               </div>
 

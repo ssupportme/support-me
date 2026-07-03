@@ -1,12 +1,14 @@
 'use client';
 
 import { useState, useEffect } from 'react';
+import { toast } from 'sonner';
 import { useAuth } from '@/context/AuthContext';
 import { ProtectedRoute } from '@/components/ProtectedRoute';
 import { connectWallet } from '@/lib/wallet';
 
 interface Creator {
   id: number;
+  userId: number;
   username: string;
   displayName: string;
   walletAddress: string;
@@ -23,7 +25,6 @@ export default function SettingsPage() {
   const [loading, setLoading] = useState(true);
   const [updating, setUpdating] = useState(false);
   const [error, setError] = useState('');
-  const [success, setSuccess] = useState('');
 
   useEffect(() => {
     const fetchCreator = async () => {
@@ -39,7 +40,7 @@ export default function SettingsPage() {
         }
 
         const creators: Creator[] = await res.json();
-        const userCreator = creators.find((c: Creator) => c.id);
+        const userCreator = creators.find((c: Creator) => c.userId === user.id);
 
         if (userCreator) {
           setCreator(userCreator);
@@ -62,8 +63,7 @@ export default function SettingsPage() {
       setError('');
       const address = await connectWallet();
       setWalletAddress(address);
-      setSuccess('Wallet connected successfully!');
-      setTimeout(() => setSuccess(''), 3000);
+      toast.success('Wallet connected successfully!');
     } catch (err) {
       setError((err as Error).message);
     }
@@ -74,7 +74,6 @@ export default function SettingsPage() {
 
     setUpdating(true);
     setError('');
-    setSuccess('');
 
     try {
       const res = await fetch(
@@ -97,8 +96,7 @@ export default function SettingsPage() {
         throw new Error('Failed to update profile');
       }
 
-      setSuccess('Profile updated successfully!');
-      setTimeout(() => setSuccess(''), 3000);
+      toast.success('Profile updated successfully!');
     } catch (err) {
       setError((err as Error).message);
     } finally {
@@ -131,12 +129,6 @@ export default function SettingsPage() {
             </div>
           )}
 
-          {success && (
-            <div className="bg-green-50 border border-green-200 rounded-lg p-4 mb-6 text-green-700">
-              {success}
-            </div>
-          )}
-
           {creator ? (
             <div className="bg-white rounded-lg shadow border border-gray-200 p-8 space-y-6">
               <div>
@@ -150,7 +142,7 @@ export default function SettingsPage() {
                       type="text"
                       value={displayName}
                       onChange={(e) => setDisplayName(e.target.value)}
-                      className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none transition"
+                      className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none transition text-black"
                     />
                   </div>
 
@@ -163,7 +155,7 @@ export default function SettingsPage() {
                       onChange={(e) => setBio(e.target.value)}
                       placeholder="Tell people about yourself..."
                       rows={4}
-                      className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none transition"
+                      className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none transition text-black"
                     />
                   </div>
                 </div>
@@ -182,7 +174,7 @@ export default function SettingsPage() {
                         value={walletAddress}
                         onChange={(e) => setWalletAddress(e.target.value)}
                         placeholder="GXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX"
-                        className="flex-1 px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none transition font-mono text-sm"
+                        className="flex-1 px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none transition font-mono text-sm text-black"
                       />
                       <button
                         onClick={handleConnectWallet}

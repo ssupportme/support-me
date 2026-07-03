@@ -1,11 +1,11 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, use } from 'react';
 import Link from 'next/link';
 import * as StellarSdk from '@stellar/stellar-sdk';
+import { toast } from 'sonner';
 import { connectWallet } from '@/lib/wallet';
 import { sendDonation, DonationError } from '@/lib/contract';
-import Toast from '@/components/Toast';
 
 const HORIZON_URL = 'https://horizon-testnet.stellar.org';
 const server = new StellarSdk.Horizon.Server(HORIZON_URL);
@@ -36,8 +36,8 @@ interface Donation {
   createdAt: string;
 }
 
-export default function CreatorProfilePage({ params }: { params: { username: string } }) {
-  const { username } = params;
+export default function CreatorProfilePage({ params }: { params: Promise<{ username: string }> }) {
+  const { username } = use(params);
   const [creator, setCreator] = useState<Creator | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -50,7 +50,6 @@ export default function CreatorProfilePage({ params }: { params: { username: str
   const [donationMessage, setDonationMessage] = useState('');
   const [sending, setSending] = useState(false);
   const [txStatus, setTxStatus] = useState<string | null>(null);
-  const [toast, setToast] = useState<{ type: string; title: string; detail?: string; hash?: string } | null>(null);
 
   const presets = ['1', '5', '10', '20'];
 
@@ -82,12 +81,10 @@ export default function CreatorProfilePage({ params }: { params: { username: str
       const account = await server.loadAccount(address);
       const xlm = account.balances.find((b) => b.asset_type === 'native');
       setBalance(parseFloat(xlm?.balance || '0').toFixed(4));
-      setToast({ type: 'success', title: 'Wallet connected!' });
+      toast.success('Wallet connected!');
     } catch (err) {
-      setToast({
-        type: 'error',
-        title: 'Could not connect wallet',
-        detail: (err as Error).message,
+      toast.error('Could not connect wallet', {
+        description: (err as Error).message,
       });
     } finally {
       setConnecting(false);
@@ -96,10 +93,8 @@ export default function CreatorProfilePage({ params }: { params: { username: str
 
   const handleSendDonation = async () => {
     if (!userAddress || !creator?.walletAddress) {
-      setToast({
-        type: 'error',
-        title: 'Cannot send donation',
-        detail: 'Wallet not connected or creator wallet not set',
+      toast.error('Cannot send donation', {
+        description: 'Wallet not connected or creator wallet not set',
       });
       return;
     }
@@ -135,7 +130,18 @@ export default function CreatorProfilePage({ params }: { params: { username: str
         setBalance(parseFloat(xlm?.balance || '0').toFixed(4));
       } catch { }
 
-      setToast({ type: 'success', title: '🎉 Donation sent successfully!', hash });
+      toast.success('🎉 Donation sent successfully!', {
+        description: (
+          <a
+            href={`https://stellar.expert/explorer/testnet/tx/${hash}`}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="underline"
+          >
+            {hash.slice(0, 16)}…
+          </a>
+        ),
+      });
       setDonationAmount('5');
       setDonationMessage('');
     } catch (err) {
@@ -149,9 +155,9 @@ export default function CreatorProfilePage({ params }: { params: { username: str
           simulation: 'Transaction rejected',
           network: 'Network error',
         };
-        setToast({ type: 'error', title: titles[err.type] || 'Donation failed', detail: err.message });
+        toast.error(titles[err.type] || 'Donation failed', { description: err.message });
       } else {
-        setToast({ type: 'error', title: 'Donation failed', detail: (err as Error).message });
+        toast.error('Donation failed', { description: (err as Error).message });
       }
     } finally {
       setSending(false);
@@ -254,7 +260,7 @@ export default function CreatorProfilePage({ params }: { params: { username: str
                         step="0.1"
                         value={donationAmount}
                         onChange={(e) => setDonationAmount(e.target.value)}
-                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none"
+                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none text-black"
                       />
                     </div>
 
@@ -283,7 +289,7 @@ export default function CreatorProfilePage({ params }: { params: { username: str
                         onChange={(e) => setDonationMessage(e.target.value)}
                         maxLength={28}
                         placeholder="Thanks for your work!"
-                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none text-sm"
+                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none text-sm text-black"
                         rows={3}
                       />
                       <p className="text-xs text-gray-500 mt-1">
@@ -342,8 +348,6 @@ export default function CreatorProfilePage({ params }: { params: { username: str
           </div>
         </div>
       </div>
-
-      <Toast toast={toast} onDismiss={() => setToast(null)} />
     </div>
   );
 }

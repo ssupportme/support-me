@@ -2,11 +2,13 @@
 
 import { useState, useEffect } from 'react';
 import Link from 'next/link';
+import { toast } from 'sonner';
 import { useAuth } from '@/context/AuthContext';
 import { ProtectedRoute } from '@/components/ProtectedRoute';
 
 interface Creator {
   id: number;
+  userId: number;
   username: string;
   displayName: string;
   walletAddress: string;
@@ -43,7 +45,7 @@ export default function DashboardPage() {
         }
 
         const creators: Creator[] = await resCreators.json();
-        const userCreator = creators.find((c: Creator) => c.id);
+        const userCreator = creators.find((c: Creator) => c.userId === user.id);
 
         if (!userCreator) {
           // User hasn't created profile yet
@@ -154,7 +156,7 @@ export default function DashboardPage() {
               <button
                 onClick={() => {
                   navigator.clipboard.writeText(profileUrl);
-                  alert('Profile URL copied to clipboard!');
+                  toast.success('Profile URL copied to clipboard!');
                 }}
                 className="bg-indigo-600 text-white px-4 py-2 rounded-lg hover:bg-indigo-700"
               >
