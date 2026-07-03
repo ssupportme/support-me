@@ -13,7 +13,7 @@ donated XLM from donor to creator in a single transaction.
 
 - **Contract address**: [`CABIRZDB6LC5KYWUTROICM2GNJMNEU6SM2ACOTIM2V3EIQLQRPJG7XLF`](https://stellar.expert/explorer/testnet/contract/CABIRZDB6LC5KYWUTROICM2GNJMNEU6SM2ACOTIM2V3EIQLQRPJG7XLF)
 
-- **Example transaction** (CLI-verified `donate` call, transfers 1 XLM and emits a `donated` event): [`27c31f388f95403b321ccf0daa503b3cfdff5c08b4a259bfdd77ef5ea73de266`](https://stellar.expert/explorer/testnet/tx/27c31f388f95403b321ccf0daa503b3cfdff5c08b4a259bfdd77ef5ea73de266)
+- **Example transaction** (`donated 5 XLM to the creator @sammajayi wallet`): [`Transaction Details`](https://stellar.expert/explorer/testnet/op/14626038680150017)
 - **Source**: [`contracts/donation/src/lib.rs`](contracts/donation/src/lib.rs)
 - **Network**: Stellar Testnet, RPC `https://soroban-testnet.stellar.org`
 
@@ -21,6 +21,10 @@ The frontend calls this contract directly from `frontend/lib/contract.js`
 (simulate → sign → submit → poll for confirmation), with live transaction
 status shown on the donation page and errors categorized as wallet,
 simulation, or network failures.
+
+## Multi-Wallet Integration using StellarWallet Kits
+
+![Connect Wallet modal showing Freighter, xBull, Albedo, Rabet, and LOBSTR options](frontend/public/multi-wallet-integration.png)
 
 ## What's New (v2)
 
