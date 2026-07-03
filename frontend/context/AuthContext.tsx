@@ -2,6 +2,7 @@
 
 import { createContext, useContext, useState, useEffect, ReactNode } from 'react';
 import { connectWallet, disconnectWallet, signMessage } from '@/lib/wallet';
+import { API_URL } from '@/lib/api';
 
 interface User {
   id: number;
@@ -43,7 +44,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const loginWithWallet = async (): Promise<LoginResult> => {
     const address = await connectWallet();
 
-    const challengeRes = await fetch('http://localhost:4000/api/auth/challenge', {
+    const challengeRes = await fetch(`${API_URL}/api/auth/challenge`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ walletAddress: address }),
@@ -56,7 +57,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     const signedMessage = await signMessage(message, address);
 
-    const verifyRes = await fetch('http://localhost:4000/api/auth/verify', {
+    const verifyRes = await fetch(`${API_URL}/api/auth/verify`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ walletAddress: address, signedMessage }),

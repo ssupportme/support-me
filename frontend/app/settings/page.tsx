@@ -5,6 +5,7 @@ import { toast } from 'sonner';
 import { useAuth } from '@/context/AuthContext';
 import { ProtectedRoute } from '@/components/ProtectedRoute';
 import { connectWallet } from '@/lib/wallet';
+import { API_URL } from '@/lib/api';
 
 interface Creator {
   id: number;
@@ -31,7 +32,7 @@ export default function SettingsPage() {
       if (!user || !token) return;
 
       try {
-        const res = await fetch('http://localhost:4000/api/creators', {
+        const res = await fetch(`${API_URL}/api/creators`, {
           headers: { 'Authorization': `Bearer ${token}` },
         });
 
@@ -77,7 +78,7 @@ export default function SettingsPage() {
 
     try {
       const res = await fetch(
-        `http://localhost:4000/api/creators/${creator.username}`,
+        `${API_URL}/api/creators/${creator.username}`,
         {
           method: 'PUT',
           headers: {

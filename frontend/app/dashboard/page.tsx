@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { toast } from 'sonner';
 import { useAuth } from '@/context/AuthContext';
 import { ProtectedRoute } from '@/components/ProtectedRoute';
+import { API_URL } from '@/lib/api';
 
 interface Creator {
   id: number;
@@ -36,7 +37,7 @@ export default function DashboardPage() {
       if (!user || !token) return;
 
       try {
-        const resCreators = await fetch('http://localhost:4000/api/creators', {
+        const resCreators = await fetch(`${API_URL}/api/creators`, {
           headers: { 'Authorization': `Bearer ${token}` },
         });
 
@@ -57,7 +58,7 @@ export default function DashboardPage() {
         setCreator(userCreator);
 
         const resDonations = await fetch(
-          `http://localhost:4000/api/donations?creatorUsername=${userCreator.username}`,
+          `${API_URL}/api/donations?creatorUsername=${userCreator.username}`,
           { headers: { 'Authorization': `Bearer ${token}` } }
         );
 

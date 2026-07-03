@@ -6,6 +6,7 @@ import * as StellarSdk from '@stellar/stellar-sdk';
 import { toast } from 'sonner';
 import { connectWallet } from '@/lib/wallet';
 import { sendDonation, DonationError } from '@/lib/contract';
+import { API_URL } from '@/lib/api';
 
 const HORIZON_URL = 'https://horizon-testnet.stellar.org';
 const server = new StellarSdk.Horizon.Server(HORIZON_URL);
@@ -56,7 +57,7 @@ export default function CreatorProfilePage({ params }: { params: Promise<{ usern
   useEffect(() => {
     const fetchCreator = async () => {
       try {
-        const res = await fetch(`http://localhost:4000/api/creators/${username}`);
+        const res = await fetch(`${API_URL}/api/creators/${username}`);
         if (!res.ok) {
           throw new Error('Creator not found');
         }
@@ -111,7 +112,7 @@ export default function CreatorProfilePage({ params }: { params: Promise<{ usern
       });
 
       // Record donation in database
-      await fetch('http://localhost:4000/api/donations', {
+      await fetch(`${API_URL}/api/donations`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({

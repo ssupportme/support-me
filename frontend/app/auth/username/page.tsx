@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/context/AuthContext';
 import { ProtectedRoute } from '@/components/ProtectedRoute';
+import { API_URL } from '@/lib/api';
 
 export default function CreateUsernamePage() {
   const [username, setUsername] = useState('');
@@ -35,7 +36,7 @@ export default function CreateUsernamePage() {
     setLoading(true);
     try {
       const res = await fetch(
-        `http://localhost:4000/api/creators/${username}/create`,
+        `${API_URL}/api/creators/${username}/create`,
         {
           method: 'POST',
           headers: {
