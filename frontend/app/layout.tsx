@@ -14,9 +14,33 @@ const geistMono = Geist_Mono({
   subsets: ["latin"],
 });
 
+const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL || "https://support-mee.vercel.app";
+const SITE_NAME = "SupportMe";
+const SITE_DESCRIPTION =
+  "A tipping platform built on Stellar. Supporters send XLM or USDC, you cash out to your bank. No middlemen, no platform fees.";
+const DEFAULT_OG_IMAGE = "/support-me-ci.png";
+
 export const metadata: Metadata = {
-  title: "Support Me",
-  description: "Support your favorite Creator",
+  metadataBase: new URL(SITE_URL),
+  title: {
+    default: `${SITE_NAME} — Get Tipped, Get Paid`,
+    template: `%s — ${SITE_NAME}`,
+  },
+  description: SITE_DESCRIPTION,
+  openGraph: {
+    title: `${SITE_NAME} — Get Tipped, Get Paid`,
+    description: SITE_DESCRIPTION,
+    url: SITE_URL,
+    siteName: SITE_NAME,
+    images: [{ url: DEFAULT_OG_IMAGE }],
+    type: "website",
+  },
+  twitter: {
+    card: "summary_large_image",
+    title: `${SITE_NAME} — Get Tipped, Get Paid`,
+    description: SITE_DESCRIPTION,
+    images: [DEFAULT_OG_IMAGE],
+  },
 };
 
 export default function RootLayout({

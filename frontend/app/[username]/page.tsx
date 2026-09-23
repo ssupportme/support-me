@@ -9,6 +9,7 @@ interface CreatorSummary {
   displayName: string | null;
   bio: string | null;
   avatarUrl: string | null;
+  ogImageUrl?: string | null;
 }
 
 // Server-side only, purely for building link-preview metadata — the client
@@ -36,6 +37,9 @@ export async function generateMetadata({ params }: { params: ParamsPromise }): P
   const name = creator.displayName || creator.username;
   const description = creator.bio?.trim() || `Support ${name} with a tip on SupportMe.`;
   const title = `${name} (@${creator.username}) on SupportMe`;
+  // Prefer the dynamically generated OG image (name/avatar/goal composited server-side)
+  // and fall back to the creator's avatar, then to no image at all.
+  const ogImage = creator.ogImageUrl || creator.avatarUrl || undefined;
 
   return {
     title,
@@ -43,14 +47,16 @@ export async function generateMetadata({ params }: { params: ParamsPromise }): P
     openGraph: {
       title,
       description,
+      url: `/${creator.username}`,
+      siteName: 'SupportMe',
       type: 'profile',
-      images: creator.avatarUrl ? [{ url: creator.avatarUrl }] : undefined,
+      images: ogImage ? [{ url: ogImage }] : undefined,
     },
     twitter: {
-      card: creator.avatarUrl ? 'summary' : 'summary_large_image',
+      card: ogImage ? 'summary_large_image' : 'summary',
       title,
       description,
-      images: creator.avatarUrl ? [creator.avatarUrl] : undefined,
+      images: ogImage ? [ogImage] : undefined,
     },
   };
 }
