@@ -74,7 +74,7 @@ only reachable through the `donation` contract's cross-contract calls.
 - **Database**: PostgreSQL
 - **Smart Contract**: Soroban (Rust), deployed to Stellar Testnet
 - **Wallet**: Stellar SDK + Stellar Wallets Kit (Freighter, xBull, Albedo, Rabet, Lobstr)
-- **Auth**: JWT tokens, Stellar wallet sign-message challenge (SEP-0043/SEP-0053) for sign-in
+- **Auth**: JWT tokens; Stellar wallet sign-message challenge (SEP-0043/SEP-0053), Twitter/X OAuth 2.0 (Authorization Code + PKCE), and email magic links for sign-in — see [`docs/authentication.md`](docs/authentication.md)
 - **Real-Time**: Server-Sent Events (backend polls Soroban RPC for contract events, streams them to clients)
 - **Testing**: Jest + Supertest (backend), Vitest + React Testing Library (frontend), `cargo test` (contracts)
 - **CI/CD**: GitHub Actions
@@ -253,6 +253,13 @@ Frontend will run on `http://localhost:3000`
 
 ### Authentication
 
+Three sign-in methods are supported. All of them return the same session shape
+(`{ user, token, hasProfile, username }`). Full setup instructions — including
+the environment variables, how to register a Twitter app, and how to configure
+the email provider — are in [`docs/authentication.md`](docs/authentication.md).
+
+**Stellar wallet** (signature over a server-issued challenge):
+
 - `POST /api/auth/challenge` - Request a sign-in challenge for a wallet address
   - Body: `{ walletAddress }`
   - Returns: `{ message }` - a nonce-bearing message to be signed by the wallet (valid for 5 minutes)
@@ -260,6 +267,21 @@ Frontend will run on `http://localhost:3000`
 - `POST /api/auth/verify` - Verify the signed challenge and sign in
   - Body: `{ walletAddress, signedMessage }` (`signedMessage` is the base64 signature from the wallet's `signMessage` call)
   - Returns: `{ user: { id, walletAddress }, token, hasProfile, username }`
+
+**Twitter / X** (OAuth 2.0 Authorization Code + PKCE; requires `TWITTER_CLIENT_ID`, `TWITTER_CLIENT_SECRET`, `TWITTER_REDIRECT_URI`):
+
+- `GET /api/auth/twitter` - Start the flow; returns `{ redirectUrl }` to send the browser to (`503` if unconfigured)
+- `GET /api/auth/twitter/callback?code=...&state=...` - Exchange the authorization code and sign in
+  - Returns the standard session shape; `400` on missing `code`/`state`, `401` on an unknown/expired/reused `state`
+
+**Magic link (email)** (single-use, 15-minute token; requires the email provider settings and `JWT_SECRET`):
+
+- `POST /api/auth/magic-link` - Request a sign-in link (`RESEND_API_KEY` unset logs it instead of sending)
+  - Body: `{ email }`
+  - Returns: `{ message }` - the same generic message for new and existing addresses; `429` when rate-limited
+- `POST /api/auth/magic-link/verify` - Verify a token and sign in
+  - Body: `{ token }`
+  - Returns the standard session shape; `401` on an invalid, expired, or already-used token
 
 ### Creators
 
@@ -344,6 +366,23 @@ NEXT_PUBLIC_DONATION_CONTRACT_ID=CD6T563YCSYQHDMXC7VCFTKMWMXWHFHAU4NO7EAMFK57QLF
 # auto-charge. See "What's New (v5)" above for setup steps.
 # EXECUTOR_SECRET_KEY=S...
 # SUBSCRIPTION_EXECUTOR_POLL_INTERVAL_MS=60000
+
+# Twitter/X OAuth 2.0 sign-in. All three are required to enable it; if any is
+# missing, GET /api/auth/twitter and /api/auth/twitter/callback return 503.
+# Register an app at https://developer.x.com (OAuth 2.0, "Web App" type) and
+# add TWITTER_REDIRECT_URI to its allowed callback URLs. See
+# docs/authentication.md for the full walkthrough.
+# TWITTER_CLIENT_ID="..."
+# TWITTER_CLIENT_SECRET="..."
+# TWITTER_REDIRECT_URI="http://localhost:3000/auth/twitter/callback"
+
+# Magic link (email) sign-in. Magic links are sent through Resend; without
+# RESEND_API_KEY the message (and link) is logged instead of sent, so the flow
+# still works in local dev. EMAIL_FROM must be a domain/address verified in
+# Resend, and APP_URL is the public origin used to build the verification link.
+# RESEND_API_KEY="re_..."
+# EMAIL_FROM="SupportMe <notifications@supportme.app>"
+# APP_URL="http://localhost:3000"
 ```
 
 ### Frontend (.env.local)
@@ -493,9 +532,14 @@ npm run build
 
 - JWT tokens expire in 7 days
 - Sign-in requires a signed challenge message proving ownership of the wallet's private key (SEP-0053 verification), not just a submitted address
+- Twitter/X sign-in uses OAuth 2.0 Authorization Code + PKCE; the PKCE verifier and the single-use `state` value stay server-side and expire after 10 minutes
+- Magic-link tokens are stored only as SHA-256 hashes, are single-use, expire after 15 minutes, and are rate-limited to 5 requests per email per 15 minutes; requesting a link never reveals whether an address has an account
+- Twitter OAuth and magic link degrade gracefully: unconfigured providers return `503` instead of breaking startup, so a deployment only needs the methods it enables
 - All sensitive routes require valid JWT token
 - CORS is enabled for development (configure for production)
 - Stellar transactions are signed client-side via the connected wallet (Stellar Wallets Kit)
+
+See [`docs/authentication.md`](docs/authentication.md) for auth setup details and the full set of auth-related environment variables.
 
 ## Contributing
 
