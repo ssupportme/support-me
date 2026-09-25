@@ -40,8 +40,20 @@
   --shadow-brutal-lg: 6px 6px 0 0 #0a0a0a;
 
   --font-sans: var(--font-geist-sans);
+  --font-display: var(--font-display), var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
 }
+
+h1, h2, h3, h4, .font-display {
+  font-family: var(--font-display), sans-serif;
+  letter-spacing: -0.02em;
+}
+
+/* Documented type scale for display and body rhythm */
+.text-display-2xl { font-size: 3.25rem; line-height: 1.1; font-weight: 800; font-family: var(--font-display), sans-serif; }
+.text-display-xl { font-size: 2.5rem; line-height: 1.15; font-weight: 700; font-family: var(--font-display), sans-serif; }
+.text-display-lg { font-size: 1.875rem; line-height: 1.2; font-weight: 700; font-family: var(--font-display), sans-serif; }
+.text-display-md { font-size: 1.5rem; line-height: 1.25; font-weight: 600; font-family: var(--font-display), sans-serif; }
 
 body {
   background: var(--background);

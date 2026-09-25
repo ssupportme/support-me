@@ -44,10 +44,34 @@ export default function AppHubPage() {
   const [loading, setLoading] = useState(true);
   const [balances, setBalances] = useState<Balances>({});
   const [balancesLoading, setBalancesLoading] = useState(true);
-  const [hidden, setHidden] = useState(false);
+  const [hidden, setHidden] = useState(true);
   const [showUsd, setShowUsd] = useState(false);
   const [copied, setCopied] = useState(false);
   const [showShareModal, setShowShareModal] = useState(false);
+
+  // Load balance masking preference from localStorage (defaults to hidden = true)
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem('balance_hidden');
+      if (saved !== null) {
+        setHidden(saved === 'true');
+      }
+    } catch {
+      // Ignore localStorage errors
+    }
+  }, []);
+
+  const toggleHidden = () => {
+    setHidden((prev) => {
+      const next = !prev;
+      try {
+        localStorage.setItem('balance_hidden', String(next));
+      } catch {
+        // Ignore localStorage errors
+      }
+      return next;
+    });
+  };
 
 
   // Stable across renders so the balance-loading effect below doesn't re-run in
@@ -175,7 +199,7 @@ export default function AppHubPage() {
                   </button>
                 )}
                 <button
-                  onClick={() => setHidden((v) => !v)}
+                  onClick={toggleHidden}
                   aria-label={hidden ? 'Show balance' : 'Hide balance'}
                   className="btn-brutal btn-brutal-white text-xs px-3 py-1.5 gap-1.5"
                 >
