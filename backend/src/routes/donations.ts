@@ -82,8 +82,17 @@ router.post(
     // not on every retry a client makes with the same Idempotency-Key.
     let isNewDonation = false;
 
-    const record = async (client: Prisma.TransactionClient): Promise<Donation> => {
-      await client.donationIdempotencyKey.deleteMany({ where: { expiresAt: { lt: new Date() } } });
+      // Cap per-request cleanup to a small batch size to avoid unbounded write load/lock contention
+      const expiredKeys = await client.donationIdempotencyKey.findMany({
+        where: { expiresAt: { lt: new Date() } },
+        select: { key: true },
+        take: 10,
+      });
+      if (expiredKeys.length > 0) {
+        await client.donationIdempotencyKey.deleteMany({
+          where: { key: { in: expiredKeys.map((k) => k.key) } },
+        });
+      }
       const existing = await client.donationIdempotencyKey.findUnique({
         where: { key: idempotencyKey },
         include: { donation: true },

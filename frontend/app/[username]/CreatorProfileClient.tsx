@@ -623,106 +623,121 @@ export default function CreatorProfileClient({ params }: { params: Promise<{ use
                 </fieldset>
               )}
 
-              <div>
-                <label htmlFor="donation-amount" className="block text-sm font-bold text-ink mb-2">
-                  Amount ({assetCode})
-                </label>
-                <input
-                  id="donation-amount"
-                  type="number"
-                  min="0.1"
-                  step="0.1"
-                  value={donationAmount}
-                  onChange={(e) => setDonationAmount(e.target.value)}
-                  className="input-brutal"
-                />
-              </div>
-
-              <div className="grid grid-cols-4 gap-2">
-                {presets.map((preset) => (
-                  <button
-                    key={preset}
-                    onClick={() => setDonationAmount(preset)}
-                    className={`btn-brutal text-sm px-0 py-2 ${
-                      donationAmount === preset ? 'btn-brutal-primary' : 'btn-brutal-white'
-                    }`}
-                  >
-                    {preset}
-                  </button>
-                ))}
-              </div>
-
-              <div>
-                <label htmlFor="donation-message" className="block text-sm font-bold text-ink mb-2">
-                  Message (Optional)
-                </label>
-                <textarea
-                  id="donation-message"
-                  value={donationMessage}
-                  onChange={(e) => setDonationMessage(e.target.value)}
-                    maxLength={MAX_MEMO_LENGTH}
-                  placeholder="Thanks for your work!"
-                  className="input-brutal text-sm"
-                  rows={3}
-                />
-                  <p className="text-xs text-muted mt-1 font-medium">{donationMessage.length}/{MAX_MEMO_LENGTH}</p>
-              </div>
-
-              <div className="flex items-center justify-between gap-3">
-                <label className="flex items-center gap-2 text-sm font-bold text-ink">
-                  <input
-                    type="checkbox"
-                    checked={recurring}
-                    onChange={(e) => setRecurring(e.target.checked)}
-                    className="h-4 w-4 accent-primary"
-                  />
-                  Make it recurring
-                </label>
-
-                {recurring && (
-                  <div className="flex items-center gap-1.5">
-                    <select
-                      value={intervalChoice}
-                      onChange={(e) => setIntervalChoice(e.target.value as typeof intervalChoice)}
-                      className="input-brutal text-sm py-1.5 w-auto"
-                    >
-                      <option value="7">Weekly</option>
-                      <option value="30">Monthly</option>
-                      <option value="custom">Custom</option>
-                    </select>
-                    {intervalChoice === 'custom' && (
+              {(() => {
+                const parsedAmt = parseFloat(donationAmount);
+                const isAmountValid = Number.isFinite(parsedAmt) && parsedAmt >= 0.1;
+                return (
+                  <>
+                    <div>
+                      <label htmlFor="donation-amount" className="block text-sm font-bold text-ink mb-2">
+                        Amount ({assetCode})
+                      </label>
                       <input
+                        id="donation-amount"
                         type="number"
-                        min="1"
-                        max={MAX_CHARGE_INTERVAL_DAYS}
-                        step="1"
-                        value={customDays}
-                        onChange={(e) => setCustomDays(e.target.value)}
-                        aria-label="Days between charges"
-                        title={`Up to ${MAX_CHARGE_INTERVAL_DAYS} days`}
-                        className="input-brutal text-sm py-1.5 w-14"
+                        min="0.1"
+                        step="0.1"
+                        value={donationAmount}
+                        onChange={(e) => setDonationAmount(e.target.value)}
+                        className={`input-brutal ${!isAmountValid ? 'border-red-500' : ''}`}
                       />
+                      {!isAmountValid && (
+                        <p className="text-xs text-red-600 font-bold mt-1" role="alert">
+                          {donationAmount.trim() === ''
+                            ? 'Please enter a donation amount.'
+                            : 'Amount must be a positive number (minimum 0.1).'}
+                        </p>
+                      )}
+                    </div>
+
+                    <div className="grid grid-cols-4 gap-2">
+                      {presets.map((preset) => (
+                        <button
+                          key={preset}
+                          onClick={() => setDonationAmount(preset)}
+                          className={`btn-brutal text-sm px-0 py-2 ${
+                            donationAmount === preset ? 'btn-brutal-primary' : 'btn-brutal-white'
+                          }`}
+                        >
+                          {preset}
+                        </button>
+                      ))}
+                    </div>
+
+                    <div>
+                      <label htmlFor="donation-message" className="block text-sm font-bold text-ink mb-2">
+                        Message (Optional)
+                      </label>
+                      <textarea
+                        id="donation-message"
+                        value={donationMessage}
+                        onChange={(e) => setDonationMessage(e.target.value)}
+                        maxLength={MAX_MEMO_LENGTH}
+                        placeholder="Thanks for your work!"
+                        className="input-brutal text-sm"
+                        rows={3}
+                      />
+                      <p className="text-xs text-muted mt-1 font-medium">{donationMessage.length}/{MAX_MEMO_LENGTH}</p>
+                    </div>
+
+                    <div className="flex items-center justify-between gap-3">
+                      <label className="flex items-center gap-2 text-sm font-bold text-ink">
+                        <input
+                          type="checkbox"
+                          checked={recurring}
+                          onChange={(e) => setRecurring(e.target.checked)}
+                          className="h-4 w-4 accent-primary"
+                        />
+                        Make it recurring
+                      </label>
+
+                      {recurring && (
+                        <div className="flex items-center gap-1.5">
+                          <select
+                            value={intervalChoice}
+                            onChange={(e) => setIntervalChoice(e.target.value as typeof intervalChoice)}
+                            className="input-brutal text-sm py-1.5 w-auto"
+                          >
+                            <option value="7">Weekly</option>
+                            <option value="30">Monthly</option>
+                            <option value="custom">Custom</option>
+                          </select>
+                          {intervalChoice === 'custom' && (
+                            <input
+                              type="number"
+                              min="1"
+                              max={MAX_CHARGE_INTERVAL_DAYS}
+                              step="1"
+                              value={customDays}
+                              onChange={(e) => setCustomDays(e.target.value)}
+                              aria-label="Days between charges"
+                              title={`Up to ${MAX_CHARGE_INTERVAL_DAYS} days`}
+                              className="input-brutal text-sm py-1.5 w-14"
+                            />
+                          )}
+                        </div>
+                      )}
+                    </div>
+
+                    {recurring && (
+                      <p className="text-xs text-muted font-medium -mt-2">
+                        You&apos;ll sign once to approve several charges in advance (fewer for longer
+                        intervals), so you&apos;re not re-signing every{' '}
+                        {intervalChoice === '7' ? 'week' : intervalChoice === '30' ? 'month' : 'period'}.
+                        Cancel anytime from Subscriptions.
+                      </p>
                     )}
-                  </div>
-                )}
-              </div>
 
-              {recurring && (
-                <p className="text-xs text-muted font-medium -mt-2">
-                  You&apos;ll sign once to approve several charges in advance (fewer for longer
-                  intervals), so you&apos;re not re-signing every{' '}
-                  {intervalChoice === '7' ? 'week' : intervalChoice === '30' ? 'month' : 'period'}.
-                  Cancel anytime from Subscriptions.
-                </p>
-              )}
-
-              <button
-                onClick={recurring ? handleStartSubscription : handleSendDonation}
-                disabled={sending || !creator.walletAddress}
-                className="btn-brutal btn-brutal-lime w-full"
-              >
-                {recurring ? 'Start Recurring Donation' : 'Send Donation'}
-              </button>
+                    <button
+                      onClick={recurring ? handleStartSubscription : handleSendDonation}
+                      disabled={sending || !creator.walletAddress || !isAmountValid}
+                      className="btn-brutal btn-brutal-lime w-full disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      {recurring ? 'Start Recurring Donation' : 'Send Donation'}
+                    </button>
+                  </>
+                );
+              })()}
             </div>
           )}
         </div>
