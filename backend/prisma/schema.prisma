@@ -9,14 +9,58 @@ datasource db {
 
 model User {
   id             Int             @id @default(autoincrement())
-  walletAddress  String          @unique
-  // Optional contact address for transactional email (e.g. recurring-donation
-  // renewal / payment-failure notices). Wallet sign-in never requires it.
-  email          String?
+  // Nullable: a magic-link (#15) or OAuth (#14) account has no wallet
+  // until the user connects one. Still unique when set, so a wallet can
+  // never be claimed by more than one account.
+  walletAddress  String?         @unique
+  // Contact/sign-in address. Required for a magic-link account (that's
+  // the whole identity); optional otherwise, where it's only used for
+  // transactional email (recurring-donation renewal/failure, donation
+  // -received notices).
+  email          String?         @unique
   createdAt      DateTime        @default(now())
   updatedAt      DateTime        @updatedAt
+  // Set by POST /api/account/delete when the holder anonymizes their data;
+  // kept as an audit marker (cleared fields are the actual erasure).
+  deletedAt      DateTime?
   creator        Creator?
   adminAuditLogs AdminAuditLog[]
+  magicLinks     MagicLinkToken[]
+  oauthIdentities OAuthIdentity[]
+}
+
+// Links a third-party OAuth identity (Twitter/X, and any future provider)
+// to a User (#14). provider+providerAccountId is what create-or-attach
+// keys off: a returning user is matched by this pair, not by email.
+model OAuthIdentity {
+  id                Int      @id @default(autoincrement())
+  provider          String
+  providerAccountId String
+  userId            Int
+  user              User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  accessToken       String?
+  refreshToken      String?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  @@unique([provider, providerAccountId])
+  @@index([userId])
+}
+
+// A single-use, short-lived sign-in token emailed to a user for magic-link
+// authentication (#15). Only the SHA-256 hash of the token is stored.
+model MagicLinkToken {
+  id        Int       @id @default(autoincrement())
+  tokenHash String    @unique
+  email     String
+  userId    Int?
+  user      User?     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  @@index([email])
+  @@index([userId])
 }
 
 model AdminAuditLog {
@@ -49,12 +93,24 @@ model Creator {
   socialLinks   Json?
   acceptsXlm    Boolean        @default(true)
   acceptsUsdc   Boolean        @default(true)
+  // Mirrors acceptsUsdc: defaults false (unlike XLM/USDC) since USDT support
+  // is new — an existing creator shouldn't start accepting an asset they
+  // never opted into just because this column appeared. See migration
+  // 20260924030100_add_creator_accepts_usdt.
+  acceptsUsdt   Boolean        @default(false)
+  // Deprecated: superseded by the Goal model below, which supports multiple
+  // and/or recurring goals (see migration
+  // 20260924030000_add_goals_and_migrate_donation_goal). Kept nullable
+  // rather than dropped so existing rows aren't destroyed by the schema
+  // change alone — the migration copies each non-null value into a new Goal
+  // row before the column stops being read by the API.
   donationGoal  Int?
   createdAt     DateTime       @default(now())
   updatedAt     DateTime       @updatedAt
   donations     Donation[]
   withdrawals   Withdrawal[]
   subscriptions Subscription[]
+  goals         Goal[]
 
   @@index([walletAddress])
 }
@@ -109,6 +165,55 @@ model Withdrawal {
   @@unique([creatorId, anchorTxId])
 }
 
+// A creator can track more than one goal at once (e.g. a one-off "New mic"
+// target alongside a recurring "Monthly support" target). Each goal is
+// denominated in a single asset (`currency`) and tracks its own progress
+// server-side in `currentAmount` — donations increment it directly (see
+// services/goalService.ts) rather than the frontend deriving progress by
+// summing donations on every page load, which stopped being workable once a
+// single donation can count toward several simultaneously-active goals.
+model Goal {
+  id            Int                 @id @default(autoincrement())
+  creator       Creator             @relation(fields: [creatorId], references: [id], onDelete: Cascade)
+  creatorId     Int
+  // Short label so a creator with multiple goals can tell them apart in the
+  // UI (e.g. "New microphone", "Monthly support"). Optional: a goal migrated
+  // from the old single `donationGoal` field has none.
+  title         String?
+  targetAmount  Float
+  currentAmount Float               @default(0)
+  // Asset this goal is denominated in ("XLM", "USDC", "USDT", ...). Amounts
+  // are tracked per-asset, never normalized to USD — see the reasoning in
+  // services/goalService.ts.
+  currency      String              @default("XLM")
+  status        GoalStatus          @default(ACTIVE)
+  recurring     Boolean             @default(false)
+  // Only meaningful when `recurring` is true. Limited to the two intervals
+  // the issue actually asks for ("e.g. monthly") rather than a general cron
+  // expression, which nothing here needs yet.
+  recurrenceInterval RecurrenceInterval?
+  // Only meaningful when `recurring` is true: the instant the current
+  // progress period ends and `currentAmount` resets to 0. Set to
+  // `now() + interval` whenever a recurring goal is created or reset.
+  currentPeriodEnd   DateTime?
+  createdAt     DateTime            @default(now())
+  updatedAt     DateTime            @updatedAt
+
+  @@index([creatorId])
+  @@index([recurring, currentPeriodEnd])
+}
+
+enum GoalStatus {
+  ACTIVE
+  COMPLETED
+  EXPIRED
+}
+
+enum RecurrenceInterval {
+  WEEKLY
+  MONTHLY
+}
+
 model Subscription {
   id                Int       @id @default(autoincrement())
   creator           Creator   @relation(fields: [creatorId], references: [id])
@@ -133,4 +238,35 @@ model Subscription {
   failureNotifiedAt DateTime?
   createdAt         DateTime  @default(now())
   updatedAt         DateTime  @updatedAt
+}
+
+enum EmailEventType {
+  SENT
+  DELIVERED
+  BOUNCED
+  COMPLAINED
+  FAILED
+}
+
+// One row per email send attempt, plus one row per delivery-status webhook
+// (delivered/bounced/complained) Resend sends back for it. Keyed by
+// recipient address rather than a User relation: webhook payloads only ever
+// give us the address, and a bounce needs to be actionable even if the
+// sending code path didn't have a User row on hand.
+model EmailEvent {
+  id                Int            @id @default(autoincrement())
+  recipient         String
+  subject           String
+  type              EmailEventType
+  // Resend's message id, so a later webhook (delivered/bounced/complained)
+  // can be linked back to the SENT row for the same send. Null for send
+  // attempts that failed before Resend returned an id.
+  providerMessageId String?
+  // Populated on FAILED/BOUNCED rows so the failure is diagnosable from the
+  // row alone, without cross-referencing stdout logs.
+  errorDetail       String?
+  createdAt         DateTime       @default(now())
+
+  @@index([recipient, createdAt])
+  @@index([providerMessageId])
 }

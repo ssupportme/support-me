@@ -17,6 +17,10 @@ jest.mock("../../services/subscriptionNotifications", () => ({
   notifySubscriptionRenewed: jest.fn(),
 }));
 
+jest.mock("../../services/goalService", () => ({
+  applyDonationToGoals: jest.fn(),
+}));
+
 import prisma from "../../prisma";
 import { SubscriptionExecutor } from "../../services/subscriptionExecutor";
 import { notifySubscriptionRenewed } from "../../services/subscriptionNotifications";
@@ -52,7 +56,12 @@ describe("SubscriptionExecutor donation indexing", () => {
     jest.clearAllMocks();
     mockedPrisma.donation.upsert.mockResolvedValue({ id: 1 });
     mockedPrisma.subscription.update.mockResolvedValue(subscription);
-    mockedPrisma.$transaction.mockResolvedValue(undefined);
+    mockedPrisma.$transaction.mockImplementation(async (callback: any) => {
+      if (typeof callback === "function") {
+        return callback(mockedPrisma);
+      }
+      return Promise.all(callback);
+    });
     mockedRenewed.mockResolvedValue(undefined);
   });
 

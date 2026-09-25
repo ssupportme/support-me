@@ -13,6 +13,8 @@ import {
   notifySubscriptionRenewed,
 } from "./subscriptionNotifications";
 import { withSorobanRpcServer } from "./sorobanRpc";
+import { executorHealth } from "./executorHealth";
+import { applyDonationToGoals } from "./goalService";
 
 const NETWORK_PASSPHRASE = Networks.TESTNET;
 
@@ -52,6 +54,7 @@ export class SubscriptionExecutor {
       console.warn(
         "SubscriptionExecutor: NEXT_PUBLIC_DONATION_CONTRACT_ID is not set, skipping."
       );
+      executorHealth.markDisabled();
       return;
     }
     const executorSecretKey = getExecutorSecretKey();
@@ -59,12 +62,16 @@ export class SubscriptionExecutor {
       console.warn(
         "SubscriptionExecutor: EXECUTOR_SECRET_KEY is not set, recurring donations will not be charged."
       );
+      executorHealth.markDisabled();
       return;
     }
     if (this.timer) return;
 
     this.keypair = Keypair.fromSecret(executorSecretKey);
     const pollIntervalMs = getPollIntervalMs();
+    const expectedIntervalMs =
+      Number(process.env.SUBSCRIPTION_EXECUTOR_EXPECTED_INTERVAL_MS) || pollIntervalMs * 3;
+    executorHealth.markEnabled(expectedIntervalMs);
     this.timer = setInterval(() => {
       void this.tick();
     }, pollIntervalMs);
@@ -85,6 +92,9 @@ export class SubscriptionExecutor {
   async tick(): Promise<void> {
     if (this.running) return;
     this.running = true;
+    executorHealth.runStarted();
+    let ok = false;
+    let runError: string | undefined;
     try {
       const due = await prisma.subscription.findMany({
         where: { active: true, nextChargeAt: { lte: new Date() } },
@@ -102,10 +112,13 @@ export class SubscriptionExecutor {
           );
         }
       }
+      ok = true;
     } catch (error) {
-      console.error("SubscriptionExecutor: tick failed:", (error as Error).message);
+      runError = (error as Error).message;
+      console.error("SubscriptionExecutor: tick failed:", runError);
     } finally {
       this.running = false;
+      executorHealth.runFinished(ok, runError);
     }
   }
 
@@ -120,8 +133,8 @@ export class SubscriptionExecutor {
 
     const nextChargeAt = new Date(Date.now() + subscription.intervalSecs * 1000);
     const onChainEventId = `${hash}:0:0`;
-    await prisma.$transaction([
-      prisma.donation.upsert({
+    await prisma.$transaction(async (client) => {
+      await client.donation.upsert({
         where: {
           transactionHash_operationIndex_eventIndex: {
             transactionHash: hash,
@@ -142,8 +155,8 @@ export class SubscriptionExecutor {
           eventIndex: 0,
           verified: true,
         },
-      }),
-      prisma.subscription.update({
+      });
+      await client.subscription.update({
         where: { id: subscription.id },
         data: {
           nextChargeAt,
@@ -152,8 +165,12 @@ export class SubscriptionExecutor {
           lastError: null,
           failureNotifiedAt: null,
         },
-      }),
-    ]);
+      });
+      // A recurring donation applies to goal progress the same way a
+      // one-off donation does (see goalService.ts's applyDonationToGoals).
+      await applyDonationToGoals(client, subscription.creatorId, subscription.token, subscription.amount);
+    });
+    executorHealth.recordCharge(subscription.id, "success");
 
     // The charge already settled on-chain and is recorded; a mail outage
     // must not make it look failed (or get it retried), so just log.
@@ -172,6 +189,8 @@ export class SubscriptionExecutor {
       `SubscriptionExecutor: charge failed for subscription ${subscription.id}:`,
       message
     );
+
+    executorHealth.recordCharge(subscription.id, "failure", message);
 
     // Email once per failure streak: the executor retries every tick, and a
     // supporter shouldn't get a new email each minute for the same problem.

@@ -4,6 +4,9 @@ jest.mock("../../prisma", () => ({
     creator: {
       findUnique: jest.fn(),
     },
+    user: {
+      findUnique: jest.fn(),
+    },
     donation: {
       findMany: jest.fn(),
       count: jest.fn(),
@@ -16,16 +19,26 @@ jest.mock("../../prisma", () => ({
       delete: jest.fn(),
       create: jest.fn(),
     },
+    goal: {
+      findMany: jest.fn(),
+      update: jest.fn(),
+    },
     $transaction: jest.fn(),
   },
+}));
+
+jest.mock("../../services/email/mailer", () => ({
+  sendEmail: jest.fn().mockResolvedValue(undefined),
 }));
 
 import request from "supertest";
 import app from "../../app";
 import prisma from "../../prisma";
+import { sendEmail } from "../../services/email/mailer";
 
 const mockedPrisma = prisma as unknown as {
   creator: { findUnique: jest.Mock };
+  user: { findUnique: jest.Mock };
   donation: { findMany: jest.Mock; count: jest.Mock; create: jest.Mock; upsert: jest.Mock };
   donationIdempotencyKey: {
     deleteMany: jest.Mock;
@@ -33,15 +46,28 @@ const mockedPrisma = prisma as unknown as {
     delete: jest.Mock;
     create: jest.Mock;
   };
+  goal: { findMany: jest.Mock; update: jest.Mock };
   $transaction: jest.Mock;
 };
 
+const mockedSendEmail = sendEmail as jest.MockedFunction<typeof sendEmail>;
+
 beforeEach(() => {
+  jest.clearAllMocks();
   mockedPrisma.$transaction.mockImplementation((callback: (client: typeof mockedPrisma) => unknown) =>
     callback(mockedPrisma)
   );
   mockedPrisma.donation.count.mockResolvedValue(0);
   mockedPrisma.donationIdempotencyKey.findUnique.mockResolvedValue(null);
+  // Default: the second creator.findUnique call inside notifyDonationReceived
+  // (keyed by id, with the user relation included) finds nothing, and the
+  // supporter's wallet address is unknown — both notifications degrade to
+  // "no recipient" rather than throwing, unless a test overrides this.
+  mockedPrisma.user.findUnique.mockResolvedValue(null);
+  mockedSendEmail.mockResolvedValue(undefined);
+  // No matching active goals by default — applyDonationToGoals is a no-op
+  // unless a test explicitly sets up goals to be updated.
+  mockedPrisma.goal.findMany.mockResolvedValue([]);
 });
 
 describe("GET /api/donations", () => {
@@ -213,5 +239,224 @@ describe("POST /api/donations", () => {
     expect(res.status).toBe(201);
     expect(res.body).toEqual(original);
     expect(mockedPrisma.donation.create).not.toHaveBeenCalled();
+    // A repeated idempotency key must not double-apply the donation to goal
+    // progress — the original call already did.
+    expect(mockedPrisma.goal.findMany).not.toHaveBeenCalled();
+  });
+
+  it("applies a new donation's amount to every matching active goal (issue #20)", async () => {
+    mockedPrisma.creator.findUnique.mockResolvedValue({ id: 7, username: "bob" });
+    mockedPrisma.donation.create.mockResolvedValue({
+      id: 1,
+      creatorId: 7,
+      amount: 10,
+      currency: "XLM",
+    });
+    // Two active XLM goals and one already-completed USDC goal — only the
+    // active, currency-matching goals should be findMany'd/updated.
+    const activeGoalXlm = { id: 1, creatorId: 7, currency: "XLM", currentAmount: 5, targetAmount: 100, recurring: false, status: "ACTIVE" };
+    const activeGoalXlm2 = { id: 2, creatorId: 7, currency: "XLM", currentAmount: 95, targetAmount: 100, recurring: false, status: "ACTIVE" };
+    mockedPrisma.goal.findMany.mockResolvedValue([activeGoalXlm, activeGoalXlm2]);
+    mockedPrisma.goal.update.mockResolvedValue({});
+
+    const res = await request(app).post("/api/donations").set("Idempotency-Key", "donation-goal-1").send({
+      creatorUsername: "bob",
+      senderAddress: "GA7D5LDGFABXNYEO6LZVMTWK5JWEPTODCLYZ7TG4XDZRKKXP6OS5K5JW",
+      amount: 10,
+      currency: "XLM",
+    });
+
+    expect(res.status).toBe(201);
+    expect(mockedPrisma.goal.findMany).toHaveBeenCalledWith({
+      where: { creatorId: 7, currency: "XLM", status: "ACTIVE" },
+    });
+    // Full donation amount applied to EACH matching goal, not split between
+    // them — see the design-decision comment in services/goalService.ts.
+    expect(mockedPrisma.goal.update).toHaveBeenCalledWith({
+      where: { id: 1 },
+      data: { currentAmount: 15 },
+    });
+    // This goal crosses its target (95 + 10 = 105 >= 100) and isn't
+    // recurring, so it also flips to COMPLETED.
+    expect(mockedPrisma.goal.update).toHaveBeenCalledWith({
+      where: { id: 2 },
+      data: { currentAmount: 105, status: "COMPLETED" },
+    });
+  });
+
+  // Issue #18: USDT is just another asset code — createDonationSchema's
+  // `currency` field isn't an enum of known assets, so nothing here should
+  // need special-casing for a new one to work end-to-end.
+  it("records a donation in USDT and applies it to matching USDT goals (issue #18)", async () => {
+    mockedPrisma.creator.findUnique.mockResolvedValue({ id: 7, username: "bob" });
+    mockedPrisma.donation.create.mockResolvedValue({
+      id: 1,
+      creatorId: 7,
+      amount: 25,
+      currency: "USDT",
+    });
+    const activeGoalUsdt = {
+      id: 3,
+      creatorId: 7,
+      currency: "USDT",
+      currentAmount: 0,
+      targetAmount: 100,
+      recurring: false,
+      status: "ACTIVE",
+    };
+    mockedPrisma.goal.findMany.mockResolvedValue([activeGoalUsdt]);
+    mockedPrisma.goal.update.mockResolvedValue({});
+
+    const res = await request(app).post("/api/donations").set("Idempotency-Key", "donation-usdt-1").send({
+      creatorUsername: "bob",
+      senderAddress: "GA7D5LDGFABXNYEO6LZVMTWK5JWEPTODCLYZ7TG4XDZRKKXP6OS5K5JW",
+      amount: 25,
+      currency: "USDT",
+    });
+
+    expect(res.status).toBe(201);
+    expect(res.body.currency).toBe("USDT");
+    expect(mockedPrisma.donation.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({ currency: "USDT", amount: 25 }),
+    });
+    expect(mockedPrisma.goal.findMany).toHaveBeenCalledWith({
+      where: { creatorId: 7, currency: "USDT", status: "ACTIVE" },
+    });
+    expect(mockedPrisma.goal.update).toHaveBeenCalledWith({
+      where: { id: 3 },
+      data: { currentAmount: 25 },
+    });
+  });
+
+  it("does not apply a USDT donation to an XLM-denominated goal", async () => {
+    mockedPrisma.creator.findUnique.mockResolvedValue({ id: 7, username: "bob" });
+    mockedPrisma.donation.create.mockResolvedValue({ id: 1, creatorId: 7, amount: 25, currency: "USDT" });
+    // findMany is already scoped by currency in the query, so an XLM goal
+    // would never be returned for a USDT donation — asserting the empty
+    // result here confirms update is correctly skipped.
+    mockedPrisma.goal.findMany.mockResolvedValue([]);
+
+    await request(app).post("/api/donations").set("Idempotency-Key", "donation-usdt-2").send({
+      creatorUsername: "bob",
+      senderAddress: "GA7D5LDGFABXNYEO6LZVMTWK5JWEPTODCLYZ7TG4XDZRKKXP6OS5K5JW",
+      amount: 25,
+      currency: "USDT",
+    });
+
+    expect(mockedPrisma.goal.update).not.toHaveBeenCalled();
+  });
+
+  describe("donation notifications (#17)", () => {
+    const SENDER_ADDRESS = "GA7D5LDGFABXNYEO6LZVMTWK5JWEPTODCLYZ7TG4XDZRKKXP6OS5K5JW";
+    const created = {
+      id: 1,
+      creatorId: 7,
+      senderAddress: SENDER_ADDRESS,
+      amount: 10,
+      currency: "XLM",
+      message: "nice work",
+      transactionHash: null,
+    };
+
+    function mockCreatorLookups(withEmail: boolean) {
+      // creator.findUnique is called twice with different `where` clauses:
+      // once by username inside the transaction, once by id (with the user
+      // relation) inside notifyDonationReceived. Branch on the shape of
+      // `where` to answer each correctly.
+      mockedPrisma.creator.findUnique.mockImplementation(({ where }: { where: Record<string, unknown> }) => {
+        if ("username" in where) return Promise.resolve({ id: 7, username: "bob" });
+        return Promise.resolve({
+          id: 7,
+          username: "bob",
+          displayName: "Bob",
+          user: withEmail ? { email: "bob@example.com" } : { email: null },
+        });
+      });
+    }
+
+    it("emails the creator when they have an email on file", async () => {
+      mockCreatorLookups(true);
+      mockedPrisma.donation.create.mockResolvedValue(created);
+
+      const res = await request(app).post("/api/donations").set("Idempotency-Key", "notify-1").send({
+        creatorUsername: "bob",
+        senderAddress: SENDER_ADDRESS,
+        amount: 10,
+        message: "nice work",
+      });
+
+      expect(res.status).toBe(201);
+      expect(mockedSendEmail).toHaveBeenCalledWith(
+        expect.objectContaining({ to: "bob@example.com", subject: expect.stringContaining("donation") })
+      );
+    });
+
+    it("does not email the creator when they have no email on file, and does not fail the request", async () => {
+      mockCreatorLookups(false);
+      mockedPrisma.donation.create.mockResolvedValue(created);
+
+      const res = await request(app).post("/api/donations").set("Idempotency-Key", "notify-2").send({
+        creatorUsername: "bob",
+        senderAddress: SENDER_ADDRESS,
+        amount: 10,
+      });
+
+      expect(res.status).toBe(201);
+      expect(mockedSendEmail).not.toHaveBeenCalled();
+    });
+
+    it("emails the supporter a confirmation when their wallet address matches a known account with an email", async () => {
+      mockCreatorLookups(false);
+      mockedPrisma.donation.create.mockResolvedValue(created);
+      mockedPrisma.user.findUnique.mockResolvedValue({
+        id: 3,
+        walletAddress: SENDER_ADDRESS,
+        email: "supporter@example.com",
+      });
+
+      const res = await request(app).post("/api/donations").set("Idempotency-Key", "notify-3").send({
+        creatorUsername: "bob",
+        senderAddress: SENDER_ADDRESS,
+        amount: 10,
+      });
+
+      expect(res.status).toBe(201);
+      expect(mockedSendEmail).toHaveBeenCalledWith(
+        expect.objectContaining({ to: "supporter@example.com" })
+      );
+    });
+
+    it("does not send any notification when replaying an existing idempotency key (no new donation)", async () => {
+      const original = { id: 1, creatorId: 7, amount: 10 };
+      mockedPrisma.donationIdempotencyKey.findUnique.mockResolvedValue({
+        key: "notify-4",
+        expiresAt: new Date(Date.now() + 60_000),
+        donation: original,
+      });
+
+      const res = await request(app).post("/api/donations").set("Idempotency-Key", "notify-4").send({
+        creatorUsername: "bob",
+        senderAddress: SENDER_ADDRESS,
+        amount: 99,
+      });
+
+      expect(res.status).toBe(201);
+      expect(mockedSendEmail).not.toHaveBeenCalled();
+    });
+
+    it("still returns 201 with the created donation when email delivery throws", async () => {
+      mockCreatorLookups(true);
+      mockedPrisma.donation.create.mockResolvedValue(created);
+      mockedSendEmail.mockRejectedValue(new Error("email provider down"));
+
+      const res = await request(app).post("/api/donations").set("Idempotency-Key", "notify-5").send({
+        creatorUsername: "bob",
+        senderAddress: SENDER_ADDRESS,
+        amount: 10,
+      });
+
+      expect(res.status).toBe(201);
+      expect(res.body).toEqual(created);
+    });
   });
 });

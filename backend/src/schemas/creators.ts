@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { stellarAddress } from "./common";
+import { assetCode, stellarAddress } from "./common";
 
 export const usernameParamSchema = z.object({
   username: z.string().min(1, "username is required"),
@@ -10,6 +10,17 @@ export const listCreatorsQuerySchema = z.object({
   sort: z.enum(["newest", "most-supported"]).optional().default("newest"),
   page: z.coerce.number().int().positive().optional().default(1),
   limit: z.coerce.number().int().positive().max(50).optional().default(20),
+});
+
+export const leaderboardQuerySchema = z.object({
+  // "creators" ranks by total received; "supporters" ranks by total given.
+  type: z.enum(["creators", "supporters"]).optional().default("creators"),
+  // Donations across different currencies are never summed together (1 XLM
+  // and 1 USDC are not the same value), so a single currency is ranked at a
+  // time — defaulting to XLM, the platform's default asset.
+  currency: assetCode.optional().default("XLM"),
+  page: z.coerce.number().int().positive().optional().default(1),
+  limit: z.coerce.number().int().positive().max(100).optional().default(20),
 });
 
 const usernamePattern = /^[a-zA-Z0-9_-]{3,30}$/;
@@ -37,6 +48,11 @@ export const updateCreatorSchema = z.object({
   socialLinks: z.record(z.string().max(32), z.string().max(300)).optional(),
   acceptsXlm: z.boolean().optional(),
   acceptsUsdc: z.boolean().optional(),
-  // null clears a previously-set goal; a positive integer sets it.
+  acceptsUsdt: z.boolean().optional(),
+  // Deprecated alongside Creator.donationGoal (see prisma/schema.prisma) —
+  // still accepted here so an already-deployed frontend that hasn't picked
+  // up the multi-goal UI doesn't break, but new goals should go through
+  // POST /api/goals/:username instead. null clears a previously-set goal; a
+  // positive integer sets it.
   donationGoal: z.number().int().positive().nullable().optional(),
 });

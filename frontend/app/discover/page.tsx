@@ -5,8 +5,9 @@ import Link from 'next/link';
 import Image from 'next/image';
 import { HugeiconsIcon } from '@hugeicons/react';
 import { Search01Icon, FireIcon, Clock01Icon, FileEmptyIcon } from '@hugeicons/core-free-icons';
-import { AppNav } from '@/components/AppNav';
 import { Skeleton } from '@/components/Skeleton';
+import { WalletMenu } from '@/components/WalletMenu';
+import { useAuth } from '@/context/AuthContext';
 import { API_URL } from '@/lib/api';
 
 type Sort = 'newest' | 'most-supported';
@@ -31,6 +32,7 @@ const SORTS: { value: Sort; label: string; icon: typeof Search01Icon }[] = [
 ];
 
 export default function DiscoverPage() {
+  const { user } = useAuth();
   const [query, setQuery] = useState('');
   const [debouncedQuery, setDebouncedQuery] = useState('');
   const [sort, setSort] = useState<Sort>('newest');
@@ -98,7 +100,37 @@ export default function DiscoverPage() {
 
   return (
     <div className="min-h-screen bg-background">
-      <AppNav />
+      {/* Public-facing navigation consistent with marketing site */}
+      <nav
+        style={{ top: 'var(--offline-banner-h, 0px)' }}
+        className="sticky w-full z-50 bg-background border-b-4 border-ink"
+      >
+        <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-4 flex justify-between items-center gap-4">
+          <Link href="/" className="text-xl sm:text-2xl font-extrabold text-ink shrink-0 tracking-tight">
+            SupportMe
+          </Link>
+          <div className="hidden sm:flex items-center gap-6">
+            <a href="/#features" className="font-bold text-ink hover:text-primary transition">Features</a>
+            <a href="/#how-it-works" className="font-bold text-ink hover:text-primary transition">How it Works</a>
+            <Link href="/discover" className="font-bold text-primary underline underline-offset-4">Discover</Link>
+            {user && (
+              <Link href="/app" className="font-bold text-ink hover:text-primary transition">
+                App
+              </Link>
+            )}
+          </div>
+          <div className="flex items-center gap-4 shrink-0">
+            {user ? (
+              <WalletMenu />
+            ) : (
+              <Link href="/" className="btn-brutal btn-brutal-primary text-sm">
+                Connect Wallet
+              </Link>
+            )}
+          </div>
+        </div>
+      </nav>
+
       <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-10">
         <h1 className="text-4xl font-extrabold text-ink tracking-tight mb-2">Discover Creators</h1>
         <p className="text-muted font-medium mb-8">Find creators to support on SupportMe.</p>

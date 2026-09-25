@@ -188,11 +188,13 @@ async function callContract({ contractId = CONTRACT_ID, method, args, signerAddr
  * @returns {Promise<{ hash: string }>}
  */
 export async function sendDonation({ donorAddress, creatorAddress, amount, assetCode = 'XLM', memo, onStatus }) {
+  if (typeof window !== 'undefined' && window.__SUPPORTME_MOCK_CONTRACT__?.sendDonation) {
+    return window.__SUPPORTME_MOCK_CONTRACT__.sendDonation({ donorAddress, creatorAddress, amount, assetCode, memo, onStatus });
+  }
   const memoValue = memo || '';
   if (new TextEncoder().encode(memoValue).length > MAX_MEMO_LENGTH) {
     throw new DonationError('simulation', `Message must be ${MAX_MEMO_LENGTH} bytes or fewer.`);
   }
-
   let tokenId;
   try {
     tokenId = sacContractId(assetCode);
@@ -244,6 +246,9 @@ export async function approveAllowance({
   periodsToApprove = 12,
   onStatus,
 }) {
+  if (typeof window !== 'undefined' && window.__SUPPORTME_MOCK_CONTRACT__?.approveAllowance) {
+    return window.__SUPPORTME_MOCK_CONTRACT__.approveAllowance({ supporterAddress, amount, assetCode, intervalSecs, periodsToApprove, onStatus });
+  }
   let tokenId;
   try {
     tokenId = sacContractId(assetCode);
@@ -320,6 +325,9 @@ export async function subscribe({
   intervalSecs,
   onStatus,
 }) {
+  if (typeof window !== 'undefined' && window.__SUPPORTME_MOCK_CONTRACT__?.subscribe) {
+    return window.__SUPPORTME_MOCK_CONTRACT__.subscribe({ supporterAddress, creatorAddress, amount, assetCode, intervalSecs, onStatus });
+  }
   let tokenId;
   try {
     tokenId = sacContractId(assetCode);
@@ -356,6 +364,9 @@ export async function subscribe({
  * @returns {Promise<{ hash: string }>}
  */
 export async function cancelSubscription({ supporterAddress, subscriptionId, onStatus }) {
+  if (typeof window !== 'undefined' && window.__SUPPORTME_MOCK_CONTRACT__?.cancelSubscription) {
+    return window.__SUPPORTME_MOCK_CONTRACT__.cancelSubscription({ supporterAddress, subscriptionId, onStatus });
+  }
   const { hash } = await callContract({
     method: 'cancel_subscription',
     signerAddress: supporterAddress,

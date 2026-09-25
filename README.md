@@ -40,7 +40,18 @@ talk to each other exclusively through cross-contract calls
   - `charge_subscription` (executor-signed, draws on the allowance): [`0b7f890c3e644b57a964d4069371000a286f8df27ae69f8621c4d0e156e212d5`](https://stellar.expert/explorer/testnet/tx/0b7f890c3e644b57a964d4069371000a286f8df27ae69f8621c4d0e156e212d5)
   - `cancel_subscription` (revokes the remaining allowance in the same tx): [`34d9c3d8d544cfdb390228a82372d64755c8f479fca4d959bb4e47b9ec0a4414`](https://stellar.expert/explorer/testnet/tx/34d9c3d8d544cfdb390228a82372d64755c8f479fca4d959bb4e47b9ec0a4414)
 
-**The live demo still runs on v1** — going live on v2 means updating `NEXT_PUBLIC_DONATION_CONTRACT_ID`/`NEXT_PUBLIC_CREATOR_REGISTRY_CONTRACT_ID` on Vercel and setting `EXECUTOR_SECRET_KEY` on Railway, both left as a manual step (see "What's New (v5)" above).
+**The live demo (support-mee.vercel.app) still runs on v1.** A fresh local
+checkout's `.env.local` and `backend/.env.example` now default to the v2
+addresses above (both v2 contracts are live on testnet and were confirmed
+reachable via `stellar contract info interface` — same public interface
+shape as v1, so this is a drop-in swap, not a breaking change for any
+existing caller). Promoting the *live* demo to v2 is still a manual,
+deliberate step: update `NEXT_PUBLIC_DONATION_CONTRACT_ID`/
+`NEXT_PUBLIC_CREATOR_REGISTRY_CONTRACT_ID` on Vercel and set
+`EXECUTOR_SECRET_KEY` on Railway (see "What's New (v5)" above). That
+production repoint is intentionally left for a maintainer to trigger, not
+done as part of an automated change — flipping a live, user-facing
+deployment's contract addresses is a deliberate release action.
 
 The frontend calls the `donation` contract directly from
 `frontend/lib/contract.js` (simulate → sign → submit → poll for
@@ -55,7 +66,8 @@ only reachable through the `donation` contract's cross-contract calls.
 - **Creator Profiles**: Public, shareable creator pages with unique usernames
 - **Multi-Wallet Integration**: Connect Freighter, xBull, Albedo, Rabet, or Lobstr via Stellar Wallets Kit
 - **On-Chain Contract Calls**: Donations are settled and recorded through a deployed Soroban contract
-- **Multi-Asset Tipping**: Supporters can tip in XLM or USDC — resolved client-side in [`frontend/lib/assets.js`](frontend/lib/assets.js); set `NEXT_PUBLIC_USDC_ISSUER` to enable the asset selector, otherwise the UI falls back to XLM-only
+- **Multi-Asset Tipping**: Supporters can tip in XLM, USDC, or USDT — resolved client-side in [`frontend/lib/assets.js`](frontend/lib/assets.js); set `NEXT_PUBLIC_USDC_ISSUER`/`NEXT_PUBLIC_USDT_ISSUER` to enable each asset in the selector, otherwise the UI falls back to XLM-only. A creator opts each asset in/out from `/settings` (`acceptsXlm`/`acceptsUsdc`/`acceptsUsdt`)
+- **Creator Goals**: A creator can track multiple simultaneous and/or recurring (weekly/monthly) donation goals, each denominated in a single asset. A donation applies in full to every active goal that matches its asset — not split between them. Amounts are tracked per-asset, never normalized to USD (no price oracle exists in this app). See [`backend/src/services/goalService.ts`](backend/src/services/goalService.ts), [`backend/src/services/goalResetScheduler.ts`](backend/src/services/goalResetScheduler.ts)
 - **Recurring Donations**: Supporters grant the `donation` contract a standard SAC allowance (`approve`) and call `subscribe` to record a schedule (weekly, monthly, or custom); a backend-held "executor" keypair then calls `charge_subscription` per interval via `transfer_from`. The executor never custodies funds — `transfer_from`'s `to` is pinned to the subscription's stored creator inside the contract, so a leaked executor key can at most accelerate/replay already-approved charges, not redirect them. Supporters manage/cancel subscriptions at `/app/subscriptions` (cancelling revokes the remaining allowance in the same transaction). See [`contracts/donation/src/lib.rs`](contracts/donation/src/lib.rs), [`backend/src/services/subscriptionExecutor.ts`](backend/src/services/subscriptionExecutor.ts). Requires `EXECUTOR_SECRET_KEY` (see [`backend/.env.example`](backend/.env.example)); the v2 contracts must be pointed at (see contract table above) — the live demo still runs on v1.
 - **Fiat Cash-Out (SEP-24)**: Creators can withdraw earnings through a Stellar anchor from `/settings` (SEP-10 sign-in → hosted KYC/bank form → on-chain transfer → live status), implemented in [`frontend/lib/anchor.js`](frontend/lib/anchor.js). Defaults to the SDF reference anchor (`testanchor.stellar.org`, asset `SRT`) on testnet; point `NEXT_PUBLIC_ANCHOR_*` at a real anchor to go live. This is a testnet-only demo by design — SEP-24 is not live on mainnet yet.
 - **Donation Tracking**: Backend-stored donation history with stats
@@ -388,8 +400,9 @@ NEXT_PUBLIC_DONATION_CONTRACT_ID=CD6T563YCSYQHDMXC7VCFTKMWMXWHFHAU4NO7EAMFK57QLF
 ### Frontend (.env.local)
 
 ```env
-NEXT_PUBLIC_DONATION_CONTRACT_ID=CD6T563YCSYQHDMXC7VCFTKMWMXWHFHAU4NO7EAMFK57QLFI7SSXICYY
-NEXT_PUBLIC_CREATOR_REGISTRY_CONTRACT_ID=CCJL2GIWNNWECKGSEY2EXEGKBMN2LYJ3HVNJNZEO2AUXC4LRR7THG2U6
+# v2 (adds recurring donations/subscriptions) - see the contract table above.
+NEXT_PUBLIC_DONATION_CONTRACT_ID=CAO2UABEB4A3EYFTWCMOSTFAUZ5FBSFRESQGWQHOLASZ3RHDCQHQG2LP
+NEXT_PUBLIC_CREATOR_REGISTRY_CONTRACT_ID=CB6PH7KYI3UHAUNYIJVCV7CT6BOBROLSR4LSZB3WSGFOYOW6JFAF5NDU
 NEXT_PUBLIC_SOROBAN_RPC_URL=https://soroban-testnet.stellar.org
 # Client-side UX gate for /admin; backend ADMIN_WALLETS remains authoritative.
 # NEXT_PUBLIC_ADMIN_WALLETS=GADMIN...
@@ -454,10 +467,24 @@ id, walletAddress (unique), createdAt, updatedAt
 
 ### Creator
 ```
-id, userId (foreign key), username (unique), walletAddress, 
-displayName, bio, avatarUrl, socialLinks (JSON), donationGoal,
-createdAt, updatedAt
+id, userId (foreign key), username (unique), walletAddress,
+displayName, bio, avatarUrl, socialLinks (JSON),
+acceptsXlm (default: true), acceptsUsdc (default: true), acceptsUsdt (default: false),
+donationGoal (deprecated — see Goal below), createdAt, updatedAt
 ```
+
+### Goal
+```
+id, creatorId (foreign key), title, targetAmount (Float), currentAmount (Float, default: 0),
+currency (default: "XLM"), status (ACTIVE | COMPLETED | EXPIRED),
+recurring (default: false), recurrenceInterval (WEEKLY | MONTHLY),
+currentPeriodEnd, createdAt, updatedAt
+```
+A creator can have several goals active at once, each denominated in its own
+asset. `Creator.donationGoal` is deprecated in favor of this model — a
+migration copies any existing single goal into a `Goal` row (see
+[`backend/prisma/migrations`](backend/prisma/migrations)) rather than
+dropping it.
 
 ### Donation
 ```
@@ -545,6 +572,12 @@ See [`docs/authentication.md`](docs/authentication.md) for auth setup details an
 
 See `CONTRIBUTING.md` for guidelines on making changes, opening issues, and submitting pull requests.
 
+## Documentation
+
+- [Architecture Overview](docs/architecture.md) - System architecture and component interactions
+- [Backend API Reference](docs/backend-api-reference.md) - Complete API documentation for all backend endpoints
+- [Contract Upgrade/Migration Strategy](docs/contract-upgrade-migration.md) - Strategy and runbook for contract upgrades
+
 ## Roadmap
 
 - [ ] Twitter OAuth authentication
@@ -553,9 +586,9 @@ See `CONTRIBUTING.md` for guidelines on making changes, opening issues, and subm
 - [ ] Leaderboards (top creators, top supporters)
 - [ ] QR code generation for profiles
 - [ ] Email notifications for donations
-- [ ] Additional asset support (USDT, etc.)
+- [x] Additional asset support (USDT, etc.)
 - [ ] Embeddable donation widgets
-- [ ] Creator goals and progress tracking
+- [x] Creator goals and progress tracking
 
 ## License
 

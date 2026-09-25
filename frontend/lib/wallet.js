@@ -52,6 +52,9 @@ const ensureInit = () => {
 // Opens the built-in wallet picker modal (Freighter, xBull, Albedo, Rabet, Lobstr)
 // and returns the connected public address.
 const connectWallet = async () => {
+  if (typeof window !== 'undefined' && window.__SUPPORTME_MOCK_WALLET__?.connectWallet) {
+    return window.__SUPPORTME_MOCK_WALLET__.connectWallet();
+  }
   ensureInit();
   try {
     const { address } = await StellarWalletsKit.authModal();
@@ -62,12 +65,18 @@ const connectWallet = async () => {
 };
 
 const disconnectWallet = async () => {
+  if (typeof window !== 'undefined' && window.__SUPPORTME_MOCK_WALLET__?.disconnectWallet) {
+    return window.__SUPPORTME_MOCK_WALLET__.disconnectWallet();
+  }
   if (!initialized) return;
   await StellarWalletsKit.disconnect();
 };
 
 // Signs an XDR transaction using whichever wallet the user picked in the modal.
 const signTransaction = async (xdr, address) => {
+  if (typeof window !== 'undefined' && window.__SUPPORTME_MOCK_WALLET__?.signTransaction) {
+    return window.__SUPPORTME_MOCK_WALLET__.signTransaction(xdr, address);
+  }
   ensureInit();
   try {
     return await StellarWalletsKit.signTransaction(xdr, {
@@ -82,6 +91,9 @@ const signTransaction = async (xdr, address) => {
 // Signs an arbitrary text message (used for the wallet sign-in challenge).
 // Returns the base64-encoded signed message.
 const signMessage = async (message, address) => {
+  if (typeof window !== 'undefined' && window.__SUPPORTME_MOCK_WALLET__?.signMessage) {
+    return window.__SUPPORTME_MOCK_WALLET__.signMessage(message, address);
+  }
   ensureInit();
   try {
     const { signedMessage } = await StellarWalletsKit.signMessage(message, {
