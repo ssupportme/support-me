@@ -1,0 +1,74 @@
+{
+  "creatorProfile": {
+    "notFound": {
+      "title": "Creator not found",
+      "description": "No profile exists for <mono>@{username}</mono>."
+    },
+    "share": {
+      "tweetText": "Support {name} (@{username}) on SupportMe!",
+      "shareButton": "Share",
+      "shareAriaLabel": "Share on X/Twitter",
+      "copyLinkButton": "Copy Link",
+      "copyLinkAriaLabel": "Copy profile link",
+      "linkCopied": "Link copied to clipboard!",
+      "copyFailed": "Failed to copy link"
+    },
+    "goals": {
+      "fallbackTitle": "Goal",
+      "recurringBadge": "Recurring",
+      "ariaLabel": "{currency} goal"
+    }
+  },
+  "donate": {
+    "heading": "Support {name}",
+    "testnetBadge": "Testnet",
+    "testnetTooltip": "This app runs on Stellar Testnet — no real funds are used.",
+    "connectWallet": "Connect Wallet",
+    "connecting": "Connecting…",
+    "walletConnected": "Wallet connected!",
+    "walletLabel": "Wallet: {address}…",
+    "installWalletTitle": "Install a Stellar wallet to continue",
+    "assetLegend": "Asset",
+    "amountLabel": "Amount ({asset})",
+    "messageLabel": "Message (Optional)",
+    "messagePlaceholder": "Thanks for your work!",
+    "characterCount": "{count}/{max}",
+    "makeRecurring": "Make it recurring",
+    "intervalWeekly": "Weekly",
+    "intervalMonthly": "Monthly",
+    "intervalCustom": "Custom",
+    "daysBetweenChargesLabel": "Days between charges",
+    "daysBetweenChargesTitle": "Up to {max} days",
+    "recurringHint": "You'll sign once to approve several charges in advance (fewer for longer intervals), so you're not re-signing every {period}. Cancel anytime from Subscriptions.",
+    "periodWeek": "week",
+    "periodMonth": "month",
+    "periodOther": "period",
+    "startRecurringDonation": "Start Recurring Donation",
+    "sendDonation": "Send Donation",
+    "cannotSendDonationTitle": "Cannot send donation",
+    "cannotSendDonationMessage": "Wallet not connected or creator wallet not set",
+    "donationSentTitle": "Donation sent successfully!",
+    "donationRecordFailedTitle": "Donation sent, but we couldn't record it",
+    "donationRecordFailedDescription": "Keep this for reference:",
+    "invalidInterval": "Enter a valid interval in days",
+    "intervalTooLongTitle": "Interval too long",
+    "intervalTooLongMessage": "Stellar allows at most {max} days between charges.",
+    "recurringStartedTitle": "Recurring donation started!",
+    "recurringStartedDescription": "You'll be charged {amount} {asset} every {interval} day(s).",
+    "subscriptionSaveFailedTitle": "We couldn't save this subscription",
+    "subscriptionSaveFailedDescription": "It won't appear under Subscriptions or be charged automatically. Contact support with this transaction: {hash}",
+    "signingIn": "Signing in…",
+    "approvingAllowance": "Step 1/2: approving allowance…",
+    "startingSubscription": "Step 2/2: starting subscription…",
+    "status": {
+      "building": "Preparing transaction…",
+      "simulating": "Simulating on the network…",
+      "awaitingSignature": "Waiting for wallet signature…",
+      "submitting": "Submitting transaction…",
+      "pending": "Confirming on the network…"
+    }
+  },
+  "languageSwitcher": {
+    "label": "Language"
+  }
+}
