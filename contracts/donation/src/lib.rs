@@ -6,6 +6,15 @@
 //! contract — this contract talks to it exclusively through cross-contract
 //! calls (`env.invoke_contract`), so the two contracts can be deployed,
 //! upgraded, and audited independently.
+//! 
+//! # Storage & Rent Tradeoffs
+//! 
+//! To minimize Soroban state rent, the append-only donation log stored in 
+//! this contract operates without explicit `extend_ttl` calls. Over time, as
+//! volume grows, old records may expire and disappear from `get_donation`. 
+//! This is an accepted design choice: the backend indexing `DonatedEvent`s 
+//! is the canonical source of long-term history. Future contract upgrades 
+//! should avoid relying on the complete on-chain history being present.
 //!
 //! Multi-signature and timelock governance:
 //! High-risk administrative operations (setting executor, rotating admins,
@@ -15,7 +24,7 @@
 use common::{AdminAction, AdminProposal, CreatorProfile, DonationRecord, Subscription};
 use soroban_sdk::{
     contract, contracterror, contractevent, contractimpl, symbol_short, token, Address, Env, IntoVal, String,
-    Symbol, Val, Vec as SorobanVec,
+    Symbol, Val, Vec,
 };
 
 const DONATIONS_KEY: Symbol = symbol_short!("donations");
@@ -32,6 +41,7 @@ const REGISTRY_KEY: Symbol = symbol_short!("registry");
 const SUBSCRIPTIONS_KEY: Symbol = symbol_short!("subs");
 const SUB_COUNTER: Symbol = symbol_short!("sub_ctr");
 const EXECUTOR_KEY: Symbol = symbol_short!("executor");
+const ALLOWED_TOKEN_KEY: Symbol = symbol_short!("allowed");
 pub const MAX_MEMO_LENGTH: u32 = 140;
 
 /// Emitted whenever a donation is settled on-chain.
@@ -106,6 +116,14 @@ pub struct ProposalExecutedEvent {
     pub executor: Address,
 }
 
+#[contractevent(topics = ["goal_upd"])]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct GoalUpdatedEvent {
+    #[topic]
+    pub creator: Address,
+    pub goal_amount: i128,
+    pub updated_at: u64,
+}
 #[contracterror]
 #[derive(Copy, Clone, Debug, Eq, PartialEq, PartialOrd, Ord)]
 #[repr(u32)]
@@ -138,7 +156,7 @@ impl DonationContract {
             "donation contract already initialized"
         );
 
-        let mut admins = SorobanVec::new(&env);
+        let mut admins = Vec::new(&env);
         admins.push_back(admin.clone());
 
         env.storage().instance().set(&ADMIN_KEY, &admin);
@@ -152,7 +170,7 @@ impl DonationContract {
     /// One-time multi-sig setup: configures admin list, threshold, and timelock delay.
     pub fn initialize_multisig(
         env: Env,
-        admins: SorobanVec<Address>,
+        admins: Vec<Address>,
         threshold: u32,
         timelock_delay: u64,
         registry: Address,
@@ -179,11 +197,11 @@ impl DonationContract {
 
     /// Returns whether a given address is an authorized contract admin.
     pub fn is_admin(env: Env, address: Address) -> bool {
-        let admins: SorobanVec<Address> = env
+        let admins: Vec<Address> = env
             .storage()
             .instance()
             .get(&ADMINS_KEY)
-            .unwrap_or_else(|| SorobanVec::new(&env));
+            .unwrap_or_else(|| Vec::new(&env));
         Self::contains_address(&admins, &address)
     }
 
@@ -293,15 +311,15 @@ impl DonationContract {
                 env.storage().instance().set(&REGISTRY_KEY, &target);
             }
             AdminAction::AddAdmin(new_admin) => {
-                let mut admins: SorobanVec<Address> = env.storage().instance().get(&ADMINS_KEY).unwrap();
+                let mut admins: Vec<Address> = env.storage().instance().get(&ADMINS_KEY).unwrap();
                 if !Self::contains_address(&admins, &new_admin) {
                     admins.push_back(new_admin);
                     env.storage().instance().set(&ADMINS_KEY, &admins);
                 }
             }
             AdminAction::RemoveAdmin(old_admin) => {
-                let admins: SorobanVec<Address> = env.storage().instance().get(&ADMINS_KEY).unwrap();
-                let mut new_admins = SorobanVec::new(&env);
+                let admins: Vec<Address> = env.storage().instance().get(&ADMINS_KEY).unwrap();
+                let mut new_admins = Vec::new(&env);
                 for i in 0..admins.len() {
                     let a = admins.get(i).unwrap();
                     if a != old_admin {
@@ -314,7 +332,7 @@ impl DonationContract {
                 env.storage().instance().set(&ADMINS_KEY, &new_admins);
             }
             AdminAction::SetThreshold(new_threshold) => {
-                let admins: SorobanVec<Address> = env.storage().instance().get(&ADMINS_KEY).unwrap();
+                let admins: Vec<Address> = env.storage().instance().get(&ADMINS_KEY).unwrap();
                 assert!(
                     new_threshold > 0 && new_threshold <= admins.len(),
                     "invalid new threshold"
@@ -359,18 +377,52 @@ impl DonationContract {
     pub fn register_creator(env: Env, creator: Address, username: String) -> CreatorProfile {
         assert!(!Self::is_paused(env.clone()), "contract is currently paused");
         let registry = Self::registry_address(&env);
-        let args: SorobanVec<Val> = (creator, username).into_val(&env);
+        let args: Vec<Val> = (creator, username).into_val(&env);
         env.invoke_contract(&registry, &Symbol::new(&env, "register_creator"), args)
     }
 
     /// Cross-contract call: reads a creator's profile from CreatorRegistry.
     pub fn get_creator(env: Env, creator: Address) -> Option<CreatorProfile> {
         let registry = Self::registry_address(&env);
-        let args: SorobanVec<Val> = (creator,).into_val(&env);
+        let args: Vec<Val> = (creator,).into_val(&env);
         env.invoke_contract(&registry, &Symbol::new(&env, "get_creator"), args)
     }
 
-    /// Transfer `amount` of `token` from `donor` to `creator`, record donation, update registry.
+    /// Admin-gated: adds a token address to the allowlist.
+    pub fn add_allowed_token(env: Env, token: Address) {
+        let admin: Address = env
+            .storage()
+            .instance()
+            .get(&ADMIN_KEY)
+            .expect("donation contract not initialized: call initialize() first");
+        admin.require_auth();
+        env.storage().instance().set(&(ALLOWED_TOKEN_KEY, token), &true);
+    }
+
+    /// Admin-gated: removes a token address from the allowlist.
+    pub fn remove_allowed_token(env: Env, token: Address) {
+        let admin: Address = env
+            .storage()
+            .instance()
+            .get(&ADMIN_KEY)
+            .expect("donation contract not initialized: call initialize() first");
+        admin.require_auth();
+        env.storage().instance().remove(&(ALLOWED_TOKEN_KEY, token));
+    }
+
+    /// Checks if a token is currently in the allowlist.
+    pub fn is_token_allowed(env: Env, token: Address) -> bool {
+        env.storage().instance().has(&(ALLOWED_TOKEN_KEY, token))
+    }
+
+    /// Transfer `amount` of `token` from `donor` to `creator`, record the
+    /// donation locally, and notify the CreatorRegistry (cross-contract) so
+    /// the creator's lifetime stats stay in sync.
+    /// 
+    /// NOTE ON TTL: The donation record is stored with the network's default TTL.
+    /// To minimize rent costs on an indefinitely growing append-only log, this 
+    /// contract does not call `extend_ttl` for old records. They are allowed to expire,
+    /// with the backend relying on emitted `DonatedEvent`s for history instead.
     pub fn donate(
         env: Env,
         donor: Address,
@@ -386,12 +438,16 @@ impl DonationContract {
             memo.len() <= MAX_MEMO_LENGTH,
             "Donation memo exceeds maximum length"
         );
+        assert!(
+            Self::is_token_allowed(env.clone(), token.clone()),
+            "Token is not in the allowlist"
+        );
 
         let token_client = token::Client::new(&env, &token);
         token_client.transfer(&donor, &creator, &amount);
 
         let registry = Self::registry_address(&env);
-        let record_args: SorobanVec<Val> =
+        let record_args: Vec<Val> =
             (env.current_contract_address(), creator.clone(), amount).into_val(&env);
         let (): () = env.invoke_contract(&registry, &Symbol::new(&env, "record_donation"), record_args);
 
@@ -443,6 +499,10 @@ impl DonationContract {
         supporter.require_auth();
         assert!(amount > 0, "Subscription amount must be positive");
         assert!(interval_secs > 0, "Interval must be positive");
+        assert!(
+            Self::is_token_allowed(env.clone(), token.clone()),
+            "Token is not in the allowlist"
+        );
 
         let id: u64 = env.storage().persistent().get(&SUB_COUNTER).unwrap_or(0);
         let now = env.ledger().timestamp();
@@ -540,7 +600,7 @@ impl DonationContract {
         );
 
         let registry = Self::registry_address(&env);
-        let record_args: SorobanVec<Val> = (
+        let record_args: Vec<Val> = (
             env.current_contract_address(),
             subscription.creator.clone(),
             subscription.amount,
@@ -626,7 +686,37 @@ impl DonationContract {
             .get(&(SUBSCRIPTIONS_KEY, subscription_id))
     }
 
-    /// Get total donations count.
+    /// Cross-contract call: updates a creator's funding goal in the CreatorRegistry.
+    pub fn set_goal(env: Env, creator: Address, goal_amount: i128) {
+        creator.require_auth();
+        let registry = Self::registry_address(&env);
+        let args: Vec<Val> = (creator.clone(), goal_amount).into_val(&env);
+        let (): () = env.invoke_contract(&registry, &Symbol::new(&env, "set_goal"), args);
+
+        GoalUpdatedEvent {
+            creator,
+            goal_amount,
+            updated_at: env.ledger().timestamp(),
+        }
+        .publish(&env);
+    }
+
+    /// Cross-contract call: reads a creator's funding goal from CreatorRegistry.
+    pub fn get_goal(env: Env, creator: Address) -> Option<i128> {
+        let registry = Self::registry_address(&env);
+        let args: Vec<Val> = (creator,).into_val(&env);
+        env.invoke_contract(&registry, &Symbol::new(&env, "get_goal"), args)
+    }
+
+    /// Get all donations count (approximate, stored in counter)
+    /// 
+    /// NOTE ON STORAGE GROWTH & TTL: The donations log is an append-only structure.
+    /// It grows indefinitely, which means state rent accumulates over time.
+    /// To avoid unbounded rent costs for the contract, we do not explicitly extend
+    /// the TTL of old donation records. If old records expire due to un-extended 
+    /// TTLs, this function's counter remains valid, but `get_donation` may fail 
+    /// to find them. This is an accepted tradeoff since the emitted `DonatedEvent`s 
+    /// (indexed off-chain) are the canonical long-term record.
     pub fn get_total_donations_count(env: Env) -> u32 {
         env.storage()
             .persistent()
@@ -634,7 +724,15 @@ impl DonationContract {
             .unwrap_or(0)
     }
 
-    /// Fetch a single donation record by index.
+    /// Fetch a single donation record by its counter-based index.
+    /// 
+    /// NOTE: Donation records are subject to Soroban's state expiry. 
+    /// Because the on-chain donation log is append-only and grows indefinitely, 
+    /// the contract does not explicitly extend the TTL of these records to save 
+    /// on state rent. If a record has expired, this function will return `None`.
+    /// Downstream applications should rely on off-chain indexed `DonatedEvent`s 
+    /// as the canonical historical record, rather than depending on this function
+    /// for long-term historical data.
     pub fn get_donation(env: Env, index: u32) -> Option<DonationRecord> {
         env.storage().persistent().get(&(DONATIONS_KEY, index))
     }
@@ -651,7 +749,7 @@ impl DonationContract {
             .expect("donation contract not initialized: call initialize() first")
     }
 
-    fn contains_address(vec: &SorobanVec<Address>, target: &Address) -> bool {
+    fn contains_address(vec: &Vec<Address>, target: &Address) -> bool {
         for i in 0..vec.len() {
             if vec.get(i).unwrap() == *target {
                 return true;
@@ -712,7 +810,7 @@ mod tests {
         let admin3 = Address::generate(&env);
         let executor = Address::generate(&env);
 
-        let mut admins = SorobanVec::new(&env);
+        let mut admins = Vec::new(&env);
         admins.push_back(admin1.clone());
         admins.push_back(admin2.clone());
         admins.push_back(admin3.clone());
@@ -768,6 +866,7 @@ mod tests {
         env.ledger().with_mut(|li| li.sequence_number = 100);
 
         let token_address = create_token_contract(&env, &admin);
+        donation_client.add_allowed_token(&token_address);
         StellarAssetClient::new(&env, &token_address).mint(&donor, &10_000);
 
         donation_client.register_creator(&creator, &String::from_bytes(&env, b"awesome_dev"));
@@ -793,7 +892,6 @@ mod tests {
         let stats = registry_client.get_creator(&creator).unwrap();
         assert_eq!(stats.total_donations, 1000);
         assert_eq!(stats.donation_count, 1);
-<<<<<<< HEAD
 
         // And the donation contract's own view of the registry agrees.
         let stats_via_donation = donation_client.get_creator(&creator).unwrap();
@@ -810,6 +908,7 @@ mod tests {
         let creator = Address::generate(&env);
 
         let token_address = create_token_contract(&env, &admin);
+        donation_client.add_allowed_token(&token_address);
         StellarAssetClient::new(&env, &token_address).mint(&donor, &5_000);
 
         donation_client.donate(
@@ -827,8 +926,6 @@ mod tests {
         let stats = registry_client.get_creator(&creator).unwrap();
         assert_eq!(stats.total_donations, 250);
         assert_eq!(stats.donation_count, 1);
-=======
->>>>>>> upstream/main
     }
 
     #[test]
@@ -841,6 +938,7 @@ mod tests {
         let donor = Address::generate(&env);
         let creator = Address::generate(&env);
         let token_address = create_token_contract(&env, &admin);
+        donation_client.add_allowed_token(&token_address);
         StellarAssetClient::new(&env, &token_address).mint(&donor, &1_000);
 
         donation_client.donate(
@@ -851,7 +949,6 @@ mod tests {
             &String::from_bytes(&env, b"nope"),
         );
     }
-<<<<<<< HEAD
 
     #[test]
     #[should_panic]
@@ -863,6 +960,7 @@ mod tests {
         let donor = Address::generate(&env);
         let creator = Address::generate(&env);
         let token_address = create_token_contract(&env, &admin);
+        donation_client.add_allowed_token(&token_address);
         StellarAssetClient::new(&env, &token_address).mint(&donor, &10);
 
         donation_client.donate(
@@ -884,6 +982,7 @@ mod tests {
         let donor = Address::generate(&env);
         let creator = Address::generate(&env);
         let token_address = create_token_contract(&env, &admin);
+        donation_client.add_allowed_token(&token_address);
         StellarAssetClient::new(&env, &token_address).mint(&donor, &1_000);
         let oversized_memo = [b'x'; MAX_MEMO_LENGTH as usize + 1];
 
@@ -905,6 +1004,7 @@ mod tests {
         let donor = Address::generate(&env);
         let creator = Address::generate(&env);
         let token_address = create_token_contract(&env, &admin);
+        donation_client.add_allowed_token(&token_address);
         StellarAssetClient::new(&env, &token_address).mint(&donor, &10_000);
 
         donation_client.donate(&donor, &creator, &token_address, &100, &String::from_bytes(&env, b"one"));
@@ -924,6 +1024,7 @@ mod tests {
         let supporter = Address::generate(&env);
         let creator = Address::generate(&env);
         let token_address = create_token_contract(&env, &admin);
+        donation_client.add_allowed_token(&token_address);
 
         env.ledger().with_mut(|li| li.timestamp = 1_000);
 
@@ -948,7 +1049,9 @@ mod tests {
         let creator = Address::generate(&env);
         let executor = Address::generate(&env);
         let token_address = create_token_contract(&env, &admin);
+        donation_client.add_allowed_token(&token_address);
         StellarAssetClient::new(&env, &token_address).mint(&supporter, &10_000);
+        donation_client.register_creator(&creator, &String::from_bytes(&env, b"dev"));
 
         env.ledger().with_mut(|li| li.timestamp = 1_000);
 
@@ -986,6 +1089,7 @@ mod tests {
         let executor = Address::generate(&env);
         let impostor = Address::generate(&env);
         let token_address = create_token_contract(&env, &admin);
+        donation_client.add_allowed_token(&token_address);
 
         donation_client.set_executor(&executor);
         let id = donation_client.subscribe(&supporter, &creator, &token_address, &500, &1_000);
@@ -1004,6 +1108,7 @@ mod tests {
         let creator = Address::generate(&env);
         let executor = Address::generate(&env);
         let token_address = create_token_contract(&env, &admin);
+        donation_client.add_allowed_token(&token_address);
         StellarAssetClient::new(&env, &token_address).mint(&supporter, &10_000);
 
         env.ledger().with_mut(|li| li.timestamp = 1_000);
@@ -1026,6 +1131,7 @@ mod tests {
         let supporter = Address::generate(&env);
         let creator = Address::generate(&env);
         let token_address = create_token_contract(&env, &admin);
+        donation_client.add_allowed_token(&token_address);
 
         env.ledger().with_mut(|li| li.timestamp = 1_000);
         let id = donation_client.subscribe(&supporter, &creator, &token_address, &500, &1_000);
@@ -1051,6 +1157,7 @@ mod tests {
         let creator = Address::generate(&env);
         let executor = Address::generate(&env);
         let token_address = create_token_contract(&env, &admin);
+        donation_client.add_allowed_token(&token_address);
         StellarAssetClient::new(&env, &token_address).mint(&supporter, &10_000);
 
         env.ledger().with_mut(|li| li.timestamp = 1_000);
@@ -1080,6 +1187,45 @@ mod tests {
     }
 
     #[test]
+    #[should_panic(expected = "Token is not in the allowlist")]
+    fn test_donate_rejects_unallowed_token() {
+        let env = Env::default();
+        env.mock_all_auths_allowing_non_root_auth();
+        let (admin, donation_client, _registry_client) = setup(&env);
+
+        let donor = Address::generate(&env);
+        let creator = Address::generate(&env);
+        
+        let token_address = env.register_stellar_asset_contract_v2(admin).address();
+        StellarAssetClient::new(&env, &token_address).mint(&donor, &1_000);
+
+        donation_client.donate(
+            &donor,
+            &creator,
+            &token_address,
+            &100,
+            &String::from_bytes(&env, b"should fail"),
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "Token is not in the allowlist")]
+    fn test_subscribe_rejects_unallowed_token() {
+        let env = Env::default();
+        env.mock_all_auths_allowing_non_root_auth();
+        let (admin, donation_client, _registry_client) = setup(&env);
+
+        let supporter = Address::generate(&env);
+        let creator = Address::generate(&env);
+        
+        let token_address = env.register_stellar_asset_contract_v2(admin).address();
+
+        env.ledger().with_mut(|li| li.timestamp = 1_000);
+
+        donation_client.subscribe(&supporter, &creator, &token_address, &100, &2_592_000);
+    }
+
+    #[test]
     fn test_charge_subscription_insufficient_allowance() {
         let env = Env::default();
         env.mock_all_auths_allowing_non_root_auth();
@@ -1089,6 +1235,7 @@ mod tests {
         let creator = Address::generate(&env);
         let executor = Address::generate(&env);
         let token_address = create_token_contract(&env, &admin);
+        donation_client.add_allowed_token(&token_address);
         StellarAssetClient::new(&env, &token_address).mint(&supporter, &10_000);
 
         env.ledger().with_mut(|li| li.timestamp = 1_000);
@@ -1102,7 +1249,7 @@ mod tests {
         env.ledger().with_mut(|li| li.timestamp = 2_000);
         
         let result = donation_client.try_charge_subscription(&executor, &id);
-        assert_eq!(result, Err(Ok(ChargeError::InsufficientAllowance)));
+        assert_eq!(result.unwrap_err().unwrap(), ChargeError::InsufficientAllowance);
     }
 
     #[test]
@@ -1115,6 +1262,7 @@ mod tests {
         let creator = Address::generate(&env);
         let executor = Address::generate(&env);
         let token_address = create_token_contract(&env, &admin);
+        donation_client.add_allowed_token(&token_address);
         // Mint less than the required amount
         StellarAssetClient::new(&env, &token_address).mint(&supporter, &100);
 
@@ -1129,8 +1277,6 @@ mod tests {
         env.ledger().with_mut(|li| li.timestamp = 2_000);
         
         let result = donation_client.try_charge_subscription(&executor, &id);
-        assert_eq!(result, Err(Ok(ChargeError::InsufficientBalance)));
+        assert_eq!(result.unwrap_err().unwrap(), ChargeError::InsufficientBalance);
     }
-=======
->>>>>>> upstream/main
 }
