@@ -3,6 +3,10 @@ import { sorobanEventListener } from "./services/sorobanEventListener";
 import { subscriptionExecutor } from "./services/subscriptionExecutor";
 import { goalResetScheduler } from "./services/goalResetScheduler";
 
+import { validateConfig } from "./config";
+
+validateConfig();
+
 const port = process.env.PORT ?? 4000;
 
 app.listen(port, () => {

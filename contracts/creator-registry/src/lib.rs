@@ -303,20 +303,28 @@ impl CreatorRegistryContract {
     /// Register a new creator profile. Must be signed by the creator.
     pub fn register_creator(env: Env, creator: Address, username: String) -> CreatorProfile {
         creator.require_auth();
-        assert!(
-            env.storage()
-                .persistent()
-                .get::<_, CreatorProfile>(&creator)
-                .is_none(),
-            "creator already registered"
-        );
-
-        let profile = CreatorProfile {
-            address: creator.clone(),
-            username: username.clone(),
-            total_donations: 0,
-            donation_count: 0,
-            created_at: env.ledger().timestamp(),
+        
+        let profile = if let Some(p) = env.storage().persistent().get::<_, CreatorProfile>(&creator) {
+            // If the profile exists, it must be a placeholder created by record_donation
+            assert!(
+                p.username.len() == 0,
+                "creator already registered"
+            );
+            CreatorProfile {
+                address: creator.clone(),
+                username: username.clone(),
+                total_donations: p.total_donations,
+                donation_count: p.donation_count,
+                created_at: p.created_at,
+            }
+        } else {
+            CreatorProfile {
+                address: creator.clone(),
+                username: username.clone(),
+                total_donations: 0,
+                donation_count: 0,
+                created_at: env.ledger().timestamp(),
+            }
         };
 
         env.storage().persistent().set(&creator, &profile);
@@ -327,7 +335,13 @@ impl CreatorRegistryContract {
 
     /// Read a creator's profile, if one exists.
     pub fn get_creator(env: Env, creator: Address) -> Option<CreatorProfile> {
-        env.storage().persistent().get(&creator)
+        let profile = env.storage().persistent().get::<_, CreatorProfile>(&creator);
+        if let Some(p) = profile {
+            if p.username.len() > 0 {
+                return Some(p);
+            }
+        }
+        None
     }
 
     /// Cross-contract entry point: only the authorized donation contract may
@@ -454,6 +468,9 @@ mod tests {
         client.record_donation(&donation_contract, &creator, &1000);
         client.record_donation(&donation_contract, &creator, &500);
 
+        assert!(client.get_creator(&creator).is_none());
+
+        client.register_creator(&creator, &String::from_bytes(&env, b"dev"));
         let profile = client.get_creator(&creator).unwrap();
         assert_eq!(profile.total_donations, 1500);
         assert_eq!(profile.donation_count, 2);
@@ -528,5 +545,35 @@ mod tests {
 
         let prop_after = client.get_proposal(&prop_id).unwrap();
         assert_eq!(prop_after.executed, true);
+    }
+
+    #[test]
+    fn test_register_creator_after_donation() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let contract_id = env.register(CreatorRegistryContract, ());
+        let client = CreatorRegistryContractClient::new(&env, &contract_id);
+
+        let admin = Address::generate(&env);
+        let donation_contract = Address::generate(&env);
+        let creator = Address::generate(&env);
+
+        client.initialize(&admin, &donation_contract);
+        
+        // Donation comes first, creating a placeholder profile
+        client.record_donation(&donation_contract, &creator, &1000);
+
+        assert!(client.get_creator(&creator).is_none());
+
+        // Now the creator registers
+        let profile = client.register_creator(&creator, &String::from_bytes(&env, b"late_dev"));
+
+        assert_eq!(profile.username, String::from_bytes(&env, b"late_dev"));
+        assert_eq!(profile.total_donations, 1000);
+        assert_eq!(profile.donation_count, 1);
+        
+        let fetched = client.get_creator(&creator).unwrap();
+        assert_eq!(fetched.username, String::from_bytes(&env, b"late_dev"));
+        assert_eq!(fetched.total_donations, 1000);
     }
 }

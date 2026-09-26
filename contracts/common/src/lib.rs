@@ -6,7 +6,7 @@
 
 use soroban_sdk::{contracttype, Address, String};
 
-#[derive(Clone)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 #[contracttype]
 pub struct DonationRecord {
     pub donor: Address,
