@@ -6,6 +6,15 @@
 //! contract — this contract talks to it exclusively through cross-contract
 //! calls (`env.invoke_contract`), so the two contracts can be deployed,
 //! upgraded, and audited independently.
+//! 
+//! # Storage & Rent Tradeoffs
+//! 
+//! To minimize Soroban state rent, the append-only donation log stored in 
+//! this contract operates without explicit `extend_ttl` calls. Over time, as
+//! volume grows, old records may expire and disappear from `get_donation`. 
+//! This is an accepted design choice: the backend indexing `DonatedEvent`s 
+//! is the canonical source of long-term history. Future contract upgrades 
+//! should avoid relying on the complete on-chain history being present.
 
 use common::{CreatorProfile, DonationRecord, Subscription};
 use soroban_sdk::{
