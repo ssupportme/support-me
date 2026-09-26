@@ -1,0 +1,77 @@
+{
+  "creatorProfile": {
+    "notFound": {
+      "title": "Creador no encontrado",
+      "description": "No existe ningún perfil para <mono>@{username}</mono>."
+    },
+    "share": {
+      "tweetText": "¡Apoya a {name} (@{username}) en SupportMe!",
+      "shareButton": "Compartir",
+      "shareAriaLabel": "Compartir en X/Twitter",
+      "copyLinkButton": "Copiar enlace",
+      "copyLinkAriaLabel": "Copiar enlace del perfil",
+      "linkCopied": "¡Enlace copiado al portapapeles!",
+      "copyFailed": "No se pudo copiar el enlace"
+    },
+    "livePaused": "Actualizaciones en vivo pausadas — reconectando…",
+    "goals": {
+      "fallbackTitle": "Meta",
+      "recurringBadge": "Recurrente",
+      "ariaLabel": "Meta de {currency}"
+    }
+  },
+  "donate": {
+    "heading": "Apoya a {name}",
+    "testnetBadge": "Testnet",
+    "testnetTooltip": "Esta aplicación funciona en la Testnet de Stellar; no se usan fondos reales.",
+    "connectWallet": "Conectar billetera",
+    "connecting": "Conectando…",
+    "walletConnected": "¡Billetera conectada!",
+    "walletLabel": "Billetera: {address}…",
+    "installWalletTitle": "Instala una billetera de Stellar para continuar",
+    "assetLegend": "Activo",
+    "amountLabel": "Cantidad ({asset})",
+    "amountRequired": "Ingresa un monto de donación.",
+    "amountInvalid": "El monto debe ser un número positivo (mínimo 0.1).",
+    "messageLabel": "Mensaje (opcional)",
+    "messagePlaceholder": "¡Gracias por tu trabajo!",
+    "characterCount": "{count}/{max}",
+    "makeRecurring": "Hacerlo recurrente",
+    "intervalWeekly": "Semanal",
+    "intervalMonthly": "Mensual",
+    "intervalCustom": "Personalizado",
+    "daysBetweenChargesLabel": "Días entre cobros",
+    "daysBetweenChargesTitle": "Hasta {max} días",
+    "recurringHint": "Firmarás una vez para aprobar varios cobros por adelantado (menos para intervalos más largos), así no tendrás que firmar cada {period}. Cancela en cualquier momento desde Suscripciones.",
+    "periodWeek": "semana",
+    "periodMonth": "mes",
+    "periodOther": "período",
+    "startRecurringDonation": "Iniciar donación recurrente",
+    "sendDonation": "Enviar donación",
+    "cannotSendDonationTitle": "No se puede enviar la donación",
+    "cannotSendDonationMessage": "La billetera no está conectada o el creador no tiene billetera configurada",
+    "donationSentTitle": "¡Donación enviada con éxito!",
+    "donationRecordFailedTitle": "Donación enviada, pero no pudimos registrarla",
+    "donationRecordFailedDescription": "Guarda esto como referencia:",
+    "invalidInterval": "Ingresa un intervalo válido en días",
+    "intervalTooLongTitle": "Intervalo demasiado largo",
+    "intervalTooLongMessage": "Stellar permite un máximo de {max} días entre cobros.",
+    "recurringStartedTitle": "¡Donación recurrente iniciada!",
+    "recurringStartedDescription": "Se te cobrarán {amount} {asset} cada {interval} día(s).",
+    "subscriptionSaveFailedTitle": "No pudimos guardar esta suscripción",
+    "subscriptionSaveFailedDescription": "No aparecerá en Suscripciones ni se cobrará automáticamente. Contacta con soporte con esta transacción: {hash}",
+    "signingIn": "Iniciando sesión…",
+    "approvingAllowance": "Paso 1/2: aprobando el límite de gasto…",
+    "startingSubscription": "Paso 2/2: iniciando la suscripción…",
+    "status": {
+      "building": "Preparando la transacción…",
+      "simulating": "Simulando en la red…",
+      "awaitingSignature": "Esperando la firma de la billetera…",
+      "submitting": "Enviando la transacción…",
+      "pending": "Confirmando en la red…"
+    }
+  },
+  "languageSwitcher": {
+    "label": "Idioma"
+  }
+}

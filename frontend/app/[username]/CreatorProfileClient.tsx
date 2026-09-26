@@ -3,6 +3,7 @@
 import { useState, useEffect, useMemo, useCallback, use } from 'react';
 import Image from 'next/image';
 import * as StellarSdk from '@stellar/stellar-sdk';
+import { NextIntlClientProvider, useTranslations } from 'next-intl';
 import { notify } from '@/lib/notify';
 import { HugeiconsIcon } from '@hugeicons/react';
 import { PartyIcon, TwitterIcon, LinkIcon } from '@hugeicons/core-free-icons';
@@ -26,18 +27,12 @@ import { describeDonationFailure } from '@/lib/failures';
 import { useAuth } from '@/context/AuthContext';
 import { Skeleton } from '@/components/Skeleton';
 import { TipJarLoader } from '@/components/TipJarLoader';
+import { LanguageSwitcher } from '@/components/LanguageSwitcher';
+import { getMessages, useLocalePreference } from '@/lib/i18n';
 
 
 const HORIZON_URL = 'https://horizon-testnet.stellar.org';
 const server = new StellarSdk.Horizon.Server(HORIZON_URL);
-
-const STATUS_LABELS: Record<string, string> = {
-  building: 'Preparing transaction…',
-  simulating: 'Simulating on the network…',
-  'awaiting-signature': 'Waiting for wallet signature…',
-  submitting: 'Submitting transaction…',
-  pending: 'Confirming on the network…',
-};
 
 interface Creator {
   id: number;
@@ -72,6 +67,24 @@ interface Goal {
 
 export default function CreatorProfileClient({ params }: { params: Promise<{ username: string }> }) {
   const { username } = use(params);
+  const [locale, setLocale] = useLocalePreference();
+
+  return (
+    <NextIntlClientProvider locale={locale} messages={getMessages(locale)}>
+      <CreatorProfileView username={username} locale={locale} onLocaleChange={setLocale} />
+    </NextIntlClientProvider>
+  );
+}
+
+interface CreatorProfileViewProps {
+  username: string;
+  locale: ReturnType<typeof useLocalePreference>[0];
+  onLocaleChange: ReturnType<typeof useLocalePreference>[1];
+}
+
+function CreatorProfileView({ username, locale, onLocaleChange }: CreatorProfileViewProps) {
+  const t = useTranslations('donate');
+  const tProfile = useTranslations('creatorProfile');
   const { token, loginWithWallet } = useAuth();
   const [creator, setCreator] = useState<Creator | null>(null);
   const [goals, setGoals] = useState<Goal[]>([]);
@@ -103,6 +116,17 @@ export default function CreatorProfileClient({ params }: { params: Promise<{ use
     creator?.presetAmounts && creator.presetAmounts.length > 0
       ? creator.presetAmounts.map((amount) => String(amount))
       : DEFAULT_DONATION_PRESETS;
+
+  const statusLabels: Record<string, string> = useMemo(
+    () => ({
+      building: t('status.building'),
+      simulating: t('status.simulating'),
+      'awaiting-signature': t('status.awaitingSignature'),
+      submitting: t('status.submitting'),
+      pending: t('status.pending'),
+    }),
+    [t]
+  );
 
   // Only offer assets the creator actually accepts, intersected with what this
   // deployment supports (USDC/USDT only appear when their issuer is configured).
@@ -251,12 +275,12 @@ export default function CreatorProfileClient({ params }: { params: Promise<{ use
       const address = await connectWallet();
       setUserAddress(address);
       setBalance(await loadAssetBalance(address, assetCode));
-      notify.success('Wallet connected!');
+      notify.success(t('walletConnected'));
     } catch (err) {
       const walletError = categorizeWalletError(err);
       if (walletError.type === WALLET_CATEGORY.NO_WALLET) {
         notify.error(walletError.title, walletError.message);
-        notify.info('Install a Stellar wallet to continue', {
+        notify.info(t('installWalletTitle'), {
           description: (
             <ul className="list-disc pl-4">
               {WALLET_INSTALL_LINKS.map((wallet) => (
@@ -285,7 +309,7 @@ export default function CreatorProfileClient({ params }: { params: Promise<{ use
 
   const handleSendDonation = async () => {
     if (!userAddress || !creator?.walletAddress) {
-      notify.error('Cannot send donation', 'Wallet not connected or creator wallet not set');
+      notify.error(t('cannotSendDonationTitle'), t('cannotSendDonationMessage'));
       return;
     }
 
@@ -332,7 +356,7 @@ export default function CreatorProfileClient({ params }: { params: Promise<{ use
         </a>
       );
 
-      notify.success('Donation sent successfully!', {
+      notify.success(t('donationSentTitle'), {
         icon: <HugeiconsIcon icon={PartyIcon} size={18} strokeWidth={1.5} />,
         description: txLink,
       });
@@ -341,8 +365,8 @@ export default function CreatorProfileClient({ params }: { params: Promise<{ use
       // own records (dashboard totals, goal progress) missed it, not that the
       // donation itself failed — so it gets a separate, non-error notify.
       if (!recordRes.ok) {
-        notify.warning("Donation sent, but we couldn't record it", {
-          description: <>Keep this for reference: {txLink}</>,
+        notify.warning(t('donationRecordFailedTitle'), {
+          description: <>{t('donationRecordFailedDescription')} {txLink}</>,
         });
       }
 
@@ -362,13 +386,13 @@ export default function CreatorProfileClient({ params }: { params: Promise<{ use
 
     const intervalSecs = Math.round(parseFloat(intervalDays) * 86400);
     if (!intervalSecs || intervalSecs <= 0) {
-      notify.error('Enter a valid interval in days');
+      notify.error(t('invalidInterval'));
       return;
     }
     if (intervalSecs > MAX_CHARGE_INTERVAL_DAYS * 86400) {
       notify.error(
-        'Interval too long',
-        `Stellar allows at most ${MAX_CHARGE_INTERVAL_DAYS} days between charges.`,
+        t('intervalTooLongTitle'),
+        t('intervalTooLongMessage', { max: MAX_CHARGE_INTERVAL_DAYS }),
       );
       return;
     }
@@ -391,12 +415,12 @@ export default function CreatorProfileClient({ params }: { params: Promise<{ use
       // wallet connection.
       let authToken = token;
       if (!authToken) {
-        setSubscribeStep('Signing in…');
+        setSubscribeStep(t('signingIn'));
         const result = await loginWithWallet();
         authToken = result.token;
       }
 
-      setSubscribeStep('Step 1/2: approving allowance…');
+      setSubscribeStep(t('approvingAllowance'));
       await approveAllowance({
         supporterAddress: address,
         amount: donationAmount,
@@ -405,7 +429,7 @@ export default function CreatorProfileClient({ params }: { params: Promise<{ use
         onStatus: setTxStatus,
       });
 
-      setSubscribeStep('Step 2/2: starting subscription…');
+      setSubscribeStep(t('startingSubscription'));
       const { hash, subscriptionId } = await subscribe({
         supporterAddress: address,
         creatorAddress: creator.walletAddress,
@@ -429,18 +453,22 @@ export default function CreatorProfileClient({ params }: { params: Promise<{ use
         }),
       });
 
-      notify.success('Recurring donation started!', {
-        description: `You'll be charged ${donationAmount} ${assetCode} every ${intervalDays} day(s).`,
+      notify.success(t('recurringStartedTitle'), {
+        description: t('recurringStartedDescription', {
+          amount: donationAmount,
+          asset: assetCode,
+          interval: intervalDays,
+        }),
       });
 
       // The on-chain subscribe() already succeeded; if this recording call
       // fails, the subscription won't show up under Subscriptions and won't
       // be auto-charged, so the supporter needs to know to follow up.
       if (!recordRes.ok) {
-        notify.warning("We couldn't save this subscription", {
-          description:
-            "It won't appear under Subscriptions or be charged automatically. Contact support with this transaction: " +
-            hash.slice(0, 16) + '…',
+        notify.warning(t('subscriptionSaveFailedTitle'), {
+          description: t('subscriptionSaveFailedDescription', {
+            hash: hash.slice(0, 16) + '…',
+          }),
         });
       }
 
@@ -476,9 +504,12 @@ export default function CreatorProfileClient({ params }: { params: Promise<{ use
     return (
       <div className="min-h-screen bg-background flex items-center justify-center px-4">
         <div className="card-brutal p-10 text-center max-w-md">
-          <h1 className="text-2xl font-extrabold text-ink mb-2">Creator not found</h1>
+          <h1 className="text-2xl font-extrabold text-ink mb-2">{tProfile('notFound.title')}</h1>
           <p className="text-muted font-medium">
-            No profile exists for <span className="font-mono">@{username}</span>.
+            {tProfile.rich('notFound.description', {
+              username,
+              mono: (chunks) => <span className="font-mono">{chunks}</span>,
+            })}
           </p>
         </div>
       </div>
@@ -493,7 +524,9 @@ export default function CreatorProfileClient({ params }: { params: Promise<{ use
   const profileUrl = `${SITE_URL}/${creator.username}`;
 
   const handleShareOnTwitter = () => {
-    const text = encodeURIComponent(`Support ${displayName} (@${creator.username}) on SupportMe!`);
+    const text = encodeURIComponent(
+      tProfile('share.tweetText', { name: displayName, username: creator.username })
+    );
     const url = encodeURIComponent(profileUrl);
     window.open(`https://twitter.com/intent/tweet?text=${text}&url=${url}`, '_blank');
   };
@@ -501,9 +534,9 @@ export default function CreatorProfileClient({ params }: { params: Promise<{ use
   const handleCopyLink = async () => {
     try {
       await navigator.clipboard.writeText(profileUrl);
-      notify.success('Link copied to clipboard!');
+      notify.success(tProfile('share.linkCopied'));
     } catch {
-      notify.error('Failed to copy link');
+      notify.error(tProfile('share.copyFailed'));
     }
   };
 
@@ -559,24 +592,28 @@ export default function CreatorProfileClient({ params }: { params: Promise<{ use
             <button
               onClick={handleShareOnTwitter}
               className="btn-brutal btn-brutal-white px-3 py-2 text-sm flex items-center gap-2"
-              aria-label="Share on X/Twitter"
+              aria-label={tProfile('share.shareAriaLabel')}
             >
               <HugeiconsIcon icon={TwitterIcon} size={18} strokeWidth={2} />
-              Share
+              {tProfile('share.shareButton')}
             </button>
             <button
               onClick={handleCopyLink}
               className="btn-brutal btn-brutal-white px-3 py-2 text-sm flex items-center gap-2"
-              aria-label="Copy profile link"
+              aria-label={tProfile('share.copyLinkAriaLabel')}
             >
               <HugeiconsIcon icon={LinkIcon} size={18} strokeWidth={2} />
-              Copy Link
+              {tProfile('share.copyLinkButton')}
             </button>
+          </div>
+
+          <div className="flex items-center justify-center mt-4">
+            <LanguageSwitcher locale={locale} onChange={onLocaleChange} />
           </div>
 
           {liveStatus === 'paused' && (
             <p role="status" className="mt-4 text-xs font-bold text-ink">
-              Live updates paused — reconnecting…
+              {tProfile('livePaused')}
             </p>
           )}
 
@@ -592,10 +629,10 @@ export default function CreatorProfileClient({ params }: { params: Promise<{ use
                   <div key={g.id}>
                     <div className="flex justify-between text-sm font-bold text-ink mb-2 gap-2">
                       <span className="truncate">
-                        {g.title || 'Goal'}
+                        {g.title || tProfile('goals.fallbackTitle')}
                         {g.recurring && (
                           <span className="ml-1.5 text-[10px] font-extrabold uppercase tracking-wide text-ink/60 align-middle">
-                            Recurring
+                            {tProfile('goals.recurringBadge')}
                           </span>
                         )}
                       </span>
@@ -609,7 +646,7 @@ export default function CreatorProfileClient({ params }: { params: Promise<{ use
                       aria-valuenow={Math.round(pct)}
                       aria-valuemin={0}
                       aria-valuemax={100}
-                      aria-label={g.title || `${g.currency} goal`}
+                      aria-label={g.title || tProfile('goals.ariaLabel', { currency: g.currency })}
                     >
                       <div className="h-full bg-brand-lime" style={{ width: `${pct}%` }} />
                     </div>
@@ -623,21 +660,21 @@ export default function CreatorProfileClient({ params }: { params: Promise<{ use
         {/* Donation card */}
         <div className="card-brutal p-6">
           <div className="flex items-center justify-between gap-2 mb-4">
-            <h2 className="text-lg font-extrabold text-ink">Support {displayName}</h2>
+            <h2 className="text-lg font-extrabold text-ink">{t('heading', { name: displayName })}</h2>
             <span
               className="text-[10px] font-extrabold uppercase tracking-wide text-ink/60 border-2 border-ink/30 rounded px-1.5 py-0.5"
-              title="This app runs on Stellar Testnet — no real funds are used."
+              title={t('testnetTooltip')}
             >
-              Testnet
+              {t('testnetBadge')}
             </span>
           </div>
 
           {sending ? (
             <div className="py-2">
               <TipJarLoader fullScreen={false} />
-              {(subscribeStep || (txStatus && STATUS_LABELS[txStatus])) && (
+              {(subscribeStep || (txStatus && statusLabels[txStatus])) && (
                 <p className="text-sm text-ink text-center animate-pulse font-bold mt-2">
-                  {subscribeStep ?? STATUS_LABELS[txStatus as string]}
+                  {subscribeStep ?? statusLabels[txStatus as string]}
                 </p>
               )}
             </div>
@@ -647,12 +684,14 @@ export default function CreatorProfileClient({ params }: { params: Promise<{ use
               disabled={connecting}
               className="btn-brutal btn-brutal-primary w-full min-h-[48px]"
             >
-              {connecting ? 'Connecting…' : 'Connect Wallet'}
+              {connecting ? t('connecting') : t('connectWallet')}
             </button>
           ) : (
             <div className="space-y-4">
               <div className="card-brutal bg-brand-lime p-3 text-sm">
-                <p className="text-ink font-medium">Wallet: {userAddress.slice(0, 8)}…</p>
+                <p className="text-ink font-medium">
+                  {t('walletLabel', { address: userAddress.slice(0, 8) })}
+                </p>
                 <p className="text-ink font-extrabold mt-1">
                   {balance ?? '0.0000'} {assetCode}
                 </p>
@@ -660,7 +699,7 @@ export default function CreatorProfileClient({ params }: { params: Promise<{ use
 
               {assetCodes.length > 1 && (
                 <fieldset>
-                  <legend className="block text-sm font-bold text-ink mb-2">Asset</legend>
+                  <legend className="block text-sm font-bold text-ink mb-2">{t('assetLegend')}</legend>
                   <div className="grid grid-cols-2 gap-2">
                     {assetCodes.map((code) => (
                       <button
@@ -690,7 +729,7 @@ export default function CreatorProfileClient({ params }: { params: Promise<{ use
                   <>
                     <div>
                       <label htmlFor="donation-amount" className="block text-sm font-bold text-ink mb-2">
-                        Amount ({assetCode})
+                        {t('amountLabel', { asset: assetCode })}
                       </label>
                       <input
                         id="donation-amount"
@@ -704,8 +743,8 @@ export default function CreatorProfileClient({ params }: { params: Promise<{ use
                       {!isAmountValid && (
                         <p className="text-xs text-red-600 font-bold mt-1" role="alert">
                           {donationAmount.trim() === ''
-                            ? 'Please enter a donation amount.'
-                            : 'Amount must be a positive number (minimum 0.1).'}
+                            ? t('amountRequired')
+                            : t('amountInvalid')}
                         </p>
                       )}
                     </div>
@@ -726,18 +765,20 @@ export default function CreatorProfileClient({ params }: { params: Promise<{ use
 
                     <div>
                       <label htmlFor="donation-message" className="block text-sm font-bold text-ink mb-2">
-                        Message (Optional)
+                        {t('messageLabel')}
                       </label>
                       <textarea
                         id="donation-message"
                         value={donationMessage}
                         onChange={(e) => setDonationMessage(e.target.value)}
                         maxLength={MAX_MEMO_LENGTH}
-                        placeholder="Thanks for your work!"
+                        placeholder={t('messagePlaceholder')}
                         className="input-brutal text-sm"
                         rows={3}
                       />
-                      <p className="text-xs text-muted mt-1 font-medium">{donationMessage.length}/{MAX_MEMO_LENGTH}</p>
+                      <p className="text-xs text-muted mt-1 font-medium">
+                        {t('characterCount', { count: donationMessage.length, max: MAX_MEMO_LENGTH })}
+                      </p>
                     </div>
 
                     <div className="flex items-center justify-between gap-3">
@@ -748,7 +789,7 @@ export default function CreatorProfileClient({ params }: { params: Promise<{ use
                           onChange={(e) => setRecurring(e.target.checked)}
                           className="h-4 w-4 accent-primary"
                         />
-                        Make it recurring
+                        {t('makeRecurring')}
                       </label>
 
                       {recurring && (
@@ -758,9 +799,9 @@ export default function CreatorProfileClient({ params }: { params: Promise<{ use
                             onChange={(e) => setIntervalChoice(e.target.value as typeof intervalChoice)}
                             className="input-brutal text-sm py-1.5 w-auto min-h-[44px]"
                           >
-                            <option value="7">Weekly</option>
-                            <option value="30">Monthly</option>
-                            <option value="custom">Custom</option>
+                            <option value="7">{t('intervalWeekly')}</option>
+                            <option value="30">{t('intervalMonthly')}</option>
+                            <option value="custom">{t('intervalCustom')}</option>
                           </select>
                           {intervalChoice === 'custom' && (
                             <input
@@ -770,8 +811,8 @@ export default function CreatorProfileClient({ params }: { params: Promise<{ use
                               step="1"
                               value={customDays}
                               onChange={(e) => setCustomDays(e.target.value)}
-                              aria-label="Days between charges"
-                              title={`Up to ${MAX_CHARGE_INTERVAL_DAYS} days`}
+                              aria-label={t('daysBetweenChargesLabel')}
+                              title={t('daysBetweenChargesTitle', { max: MAX_CHARGE_INTERVAL_DAYS })}
                               className="input-brutal text-sm py-1.5 w-14 min-h-[44px]"
                             />
                           )}
@@ -781,10 +822,14 @@ export default function CreatorProfileClient({ params }: { params: Promise<{ use
 
                     {recurring && (
                       <p className="text-xs text-muted font-medium -mt-2">
-                        You&apos;ll sign once to approve several charges in advance (fewer for longer
-                        intervals), so you&apos;re not re-signing every{' '}
-                        {intervalChoice === '7' ? 'week' : intervalChoice === '30' ? 'month' : 'period'}.
-                        Cancel anytime from Subscriptions.
+                        {t('recurringHint', {
+                          period:
+                            intervalChoice === '7'
+                              ? t('periodWeek')
+                              : intervalChoice === '30'
+                                ? t('periodMonth')
+                                : t('periodOther'),
+                        })}
                       </p>
                     )}
 
@@ -793,7 +838,7 @@ export default function CreatorProfileClient({ params }: { params: Promise<{ use
                       disabled={sending || !creator.walletAddress || !isAmountValid}
                       className="btn-brutal btn-brutal-lime w-full disabled:opacity-50 disabled:cursor-not-allowed"
                     >
-                      {recurring ? 'Start Recurring Donation' : 'Send Donation'}
+                      {recurring ? t('startRecurringDonation') : t('sendDonation')}
                     </button>
                   </>
                 );

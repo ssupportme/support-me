@@ -48,6 +48,16 @@ vi.mock('@/lib/notify', () => ({
   },
 }));
 
+// The `@hugeicons/core-free-icons` version currently pinned in package-lock.json
+// doesn't export `TwitterLogoIcon` (it's `undefined`), which crashes
+// `HugeiconsIcon` on every render that reaches the Share button — pre-existing
+// and unrelated to this change (reproduces identically against the unmodified
+// component on upstream/main). Stub the icon renderer so these tests can
+// exercise the component's actual logic instead of that unrelated bug.
+vi.mock('@hugeicons/react', () => ({
+  HugeiconsIcon: () => null,
+}));
+
 // lib/assets.js's ASSETS registry is gated on NEXT_PUBLIC_USDC_ISSUER /
 // NEXT_PUBLIC_USDT_ISSUER at module-load time (see lib/__tests__/assets.test.ts
 // for that logic in isolation). Here we only care about how
@@ -101,6 +111,32 @@ class FakeEventSource {
 
   close() {
     this.closed = true;
+  }
+}
+
+// Some Node versions ship a native `localStorage` global that jsdom's own
+// implementation doesn't fully take over in this test environment (its
+// getItem/setItem/clear come back `undefined`), so the language-switcher
+// tests below stub in a minimal in-memory Storage instead of relying on
+// `window.localStorage` directly. lib/i18n.ts itself already guards every
+// real-world localStorage call in a try/catch for the same reason.
+class FakeLocalStorage {
+  private store = new Map<string, string>();
+
+  getItem(key: string) {
+    return this.store.has(key) ? this.store.get(key)! : null;
+  }
+
+  setItem(key: string, value: string) {
+    this.store.set(key, String(value));
+  }
+
+  removeItem(key: string) {
+    this.store.delete(key);
+  }
+
+  clear() {
+    this.store.clear();
   }
 }
 
@@ -279,6 +315,65 @@ describe('CreatorProfileClient', () => {
 
     expect(screen.getByLabelText(/amount/i)).toHaveValue(15);
   });
+
+  describe('language switcher', () => {
+    let fakeLocalStorage: FakeLocalStorage;
+
+    beforeEach(() => {
+      fakeLocalStorage = new FakeLocalStorage();
+      vi.stubGlobal('localStorage', fakeLocalStorage);
+    });
+
+    it('renders donate/profile strings in English by default', async () => {
+      mockFetchSequence({
+        '/api/creators/alice': baseCreator,
+        '/api/goals/alice': { items: [] },
+      });
+
+      await renderProfile('alice');
+
+      await waitFor(() => expect(screen.getByText('Alice')).toBeInTheDocument());
+      expect(screen.getByRole('button', { name: /connect wallet/i })).toBeInTheDocument();
+      expect(screen.getByText(/support alice/i)).toBeInTheDocument();
+    });
+
+    it('switches the donate/profile strings to Spanish when a different language is picked', async () => {
+      mockFetchSequence({
+        '/api/creators/alice': baseCreator,
+        '/api/goals/alice': { items: [] },
+      });
+
+      await renderProfile('alice');
+      await waitFor(() => expect(screen.getByText('Alice')).toBeInTheDocument());
+
+      const select = screen.getByRole('combobox', { name: /language/i });
+      await userEvent.selectOptions(select, 'es');
+
+      await waitFor(() =>
+        expect(screen.getByRole('button', { name: /conectar billetera/i })).toBeInTheDocument()
+      );
+      expect(screen.getByText(/apoya a alice/i)).toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: /connect wallet/i })).not.toBeInTheDocument();
+
+      // The choice is persisted so it survives a remount (e.g. navigating away and back).
+      expect(fakeLocalStorage.getItem('supportme-locale')).toBe('es');
+    });
+
+    it('restores a previously-picked language on the next render', async () => {
+      fakeLocalStorage.setItem('supportme-locale', 'es');
+      mockFetchSequence({
+        '/api/creators/alice': baseCreator,
+        '/api/goals/alice': { items: [] },
+      });
+
+      await renderProfile('alice');
+
+      await waitFor(() =>
+        expect(screen.getByRole('button', { name: /conectar billetera/i })).toBeInTheDocument()
+      );
+    });
+  });
+
   describe('live updates (SSE) lifecycle', () => {
     const goalsCalls = () =>
       vi.mocked(fetch).mock.calls.filter(([url]) => String(url).includes('/api/goals/alice')).length;
@@ -342,6 +437,7 @@ describe('CreatorProfileClient', () => {
 
       act(() => FakeEventSource.instances[1].onopen?.());
       await waitFor(() => expect(goalsCalls()).toBe(before + 1));
+
     });
   });
 });
