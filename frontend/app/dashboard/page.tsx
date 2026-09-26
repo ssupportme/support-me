@@ -352,46 +352,67 @@ export default function DashboardPage() {
             </div>
           )}
 
-          {/* Volume by asset, plus lifetime cashed out */}
-          <div className="grid md:grid-cols-3 gap-6 mb-8">
-            <div className="card-brutal bg-brand-cyan p-6">
-              <p className="text-ink text-sm font-bold uppercase tracking-wide">XLM Volume</p>
-              <p className="text-2xl sm:text-3xl font-extrabold text-ink mt-2 tabular-nums">
-                {Math.round(xlmVolume).toLocaleString()} <span className="text-xl">XLM</span>
+          {donations.length === 0 ? (
+            /* No tips yet — a zeroed stats grid and an empty chart would read as
+               broken, so show an encouraging empty state with a share CTA instead. */
+            <div className="card-brutal bg-card p-10 text-center mb-8">
+              <h2 className="text-2xl font-extrabold text-ink mb-2">Waiting for your first supporter</h2>
+              <p className="text-muted font-medium mb-6 max-w-md mx-auto">
+                Your tip volume and activity will show up here as soon as someone sends you a
+                tip. Share your page so people know where to support you.
               </p>
-              {formatUsd(xlmVolume, 'XLM', prices) && (
-                <p className="text-sm font-bold text-ink/70 mt-1">{formatUsd(xlmVolume, 'XLM', prices)}</p>
-              )}
+              <button
+                type="button"
+                onClick={() => setShowShareModal(true)}
+                className="btn-brutal btn-brutal-primary"
+              >
+                Share your page
+              </button>
             </div>
-            <div className="card-brutal bg-brand-lime p-6">
-              <p className="text-ink text-sm font-bold uppercase tracking-wide">USDC Volume</p>
-              <p className="text-2xl sm:text-3xl font-extrabold text-ink mt-2 tabular-nums">
-                {Math.round(usdcVolume)} <span className="text-xl">USDC</span>
-              </p>
-              {formatUsd(usdcVolume, 'USDC', prices) && (
-                <p className="text-sm font-bold text-ink/70 mt-1">{formatUsd(usdcVolume, 'USDC', prices)}</p>
-              )}
-            </div>
-            <div className="card-brutal bg-card p-6">
-              <p className="text-ink text-sm font-bold uppercase tracking-wide">Withdrawn</p>
-              {withdrawnTotal === 0 ? (
-                <p className="text-4xl font-extrabold text-ink/40 mt-2 tabular-nums">—</p>
-              ) : (
-                <div className="mt-2 space-y-1">
-                  {Object.entries(withdrawnByCurrency).map(([currency, amount]) => (
-                    <p key={currency} className="text-2xl sm:text-3xl font-extrabold text-ink tabular-nums">
-                      {Math.round(amount)} <span className="text-xl">{currency}</span>
-                    </p>
-                  ))}
+          ) : (
+            <>
+              {/* Volume by asset, plus lifetime cashed out */}
+              <div className="grid md:grid-cols-3 gap-6 mb-8">
+                <div className="card-brutal bg-brand-cyan p-6">
+                  <p className="text-ink text-sm font-bold uppercase tracking-wide">XLM Volume</p>
+                  <p className="text-2xl sm:text-3xl font-extrabold text-ink mt-2 tabular-nums">
+                    {Math.round(xlmVolume).toLocaleString()} <span className="text-xl">XLM</span>
+                  </p>
+                  {formatUsd(xlmVolume, 'XLM', prices) && (
+                    <p className="text-sm font-bold text-ink/70 mt-1">{formatUsd(xlmVolume, 'XLM', prices)}</p>
+                  )}
                 </div>
-              )}
-            </div>
-          </div>
+                <div className="card-brutal bg-brand-lime p-6">
+                  <p className="text-ink text-sm font-bold uppercase tracking-wide">USDC Volume</p>
+                  <p className="text-2xl sm:text-3xl font-extrabold text-ink mt-2 tabular-nums">
+                    {Math.round(usdcVolume)} <span className="text-xl">USDC</span>
+                  </p>
+                  {formatUsd(usdcVolume, 'USDC', prices) && (
+                    <p className="text-sm font-bold text-ink/70 mt-1">{formatUsd(usdcVolume, 'USDC', prices)}</p>
+                  )}
+                </div>
+                <div className="card-brutal bg-card p-6">
+                  <p className="text-ink text-sm font-bold uppercase tracking-wide">Withdrawn</p>
+                  {withdrawnTotal === 0 ? (
+                    <p className="text-4xl font-extrabold text-ink/40 mt-2 tabular-nums">—</p>
+                  ) : (
+                    <div className="mt-2 space-y-1">
+                      {Object.entries(withdrawnByCurrency).map(([currency, amount]) => (
+                        <p key={currency} className="text-2xl sm:text-3xl font-extrabold text-ink tabular-nums">
+                          {Math.round(amount)} <span className="text-xl">{currency}</span>
+                        </p>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </div>
 
-          {/* Earnings over time chart */}
-          <div className="mb-8">
-            <TipChart donations={donations} />
-          </div>
+              {/* Earnings over time chart */}
+              <div className="mb-8">
+                <TipChart donations={donations} />
+              </div>
+            </>
+          )}
 
           {/* Recent Activity — tips received and cash-outs, newest first */}
           <div className="card-brutal p-4 sm:p-6 overflow-x-auto">
@@ -407,7 +428,9 @@ export default function DashboardPage() {
               </button>
             </div>
             {activity.length === 0 ? (
-              <p className="text-muted font-medium">No activity yet. Share your profile link to get started!</p>
+              <p className="text-muted font-medium text-center py-6">
+                No activity yet. Share your page above to start receiving tips.
+              </p>
             ) : (
               <ul className="divide-y divide-ink/10">
                 {activity.map((item) => {

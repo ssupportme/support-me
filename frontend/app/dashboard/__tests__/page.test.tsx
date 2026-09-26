@@ -1,8 +1,32 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { forwardRef } from 'react';
 import { render, screen, waitFor, act, fireEvent } from '@testing-library/react';
 import DashboardPage from '@/app/dashboard/page';
 import { useAuth } from '@/context/AuthContext';
 import { toast } from 'sonner';
+
+// jsdom has no real <canvas> implementation. The empty-state CTA opens the
+// real ShareModal (rather than a mock), which renders QrCodeCard, so stub
+// qrcode.react the same way ShareModal's/QrCodeCard's own tests do.
+vi.mock('qrcode.react', () => {
+  const MockQRCodeCanvas = forwardRef<HTMLCanvasElement>((_props, ref) => (
+    <canvas
+      ref={(el) => {
+        if (typeof ref === 'function') ref(el);
+        else if (ref) ref.current = el;
+      }}
+      data-testid="qr-canvas"
+    />
+  ));
+  MockQRCodeCanvas.displayName = 'MockQRCodeCanvas';
+
+  return {
+    QRCodeCanvas: MockQRCodeCanvas,
+    QRCodeSVG: ({ id, value }: { id: string; value: string }) => (
+      <svg id={id} data-testid="qr-svg" data-value={value} />
+    ),
+  };
+});
 
 vi.mock('@/context/AuthContext', () => ({
   useAuth: vi.fn(),
@@ -421,6 +445,48 @@ describe('DashboardPage', () => {
 
     await waitFor(() => expect(screen.getByText('scrolled item')).toBeInTheDocument());
     expect(scrollToSpy).toHaveBeenCalledWith({ top: 600, behavior: 'instant' });
+  });
+
+  it('shows a friendly empty state with a share CTA when there are no donations yet', async () => {
+    mockFetchByUrl({ creator, donations: [] });
+
+    render(<DashboardPage />);
+
+    await waitFor(() => expect(screen.getByText('Dashboard')).toBeInTheDocument());
+
+    // Encouraging copy instead of zeroed stat cards.
+    expect(screen.getByText('Waiting for your first supporter')).toBeInTheDocument();
+    expect(screen.queryByText('XLM Volume')).not.toBeInTheDocument();
+    expect(screen.queryByText('USDC Volume')).not.toBeInTheDocument();
+
+    // The activity feed also reads as an empty state rather than a blank list.
+    expect(
+      screen.getByText('No activity yet. Share your page above to start receiving tips.')
+    ).toBeInTheDocument();
+
+    await waitFor(() => expect(FakeEventSource.instances.length).toBe(1));
+  });
+
+  it('opens the share modal from the empty-state CTA so the creator can share their page', async () => {
+    mockFetchByUrl({ creator, donations: [] });
+
+    render(<DashboardPage />);
+
+    await waitFor(() => expect(screen.getByText('Dashboard')).toBeInTheDocument());
+
+    const ctaBtn = screen.getByRole('button', { name: /share your page/i });
+    fireEvent.click(ctaBtn);
+
+    await waitFor(() => {
+      expect(screen.getByRole('dialog')).toBeInTheDocument();
+      // The link section builds the URL from the creator's username, the same
+      // convention used by ShareModal/QrCodeCard elsewhere in the app.
+      expect(
+        (screen.getByLabelText('Profile link input') as HTMLInputElement).value
+      ).toContain('/alice');
+    });
+
+    await waitFor(() => expect(FakeEventSource.instances.length).toBe(1));
   });
 
   it('displays error and allows retrying if loading next page fails', async () => {
