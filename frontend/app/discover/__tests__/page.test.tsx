@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor, fireEvent } from '@testing-library/react';
 import DiscoverPage from '@/app/discover/page';
 import { useAuth } from '@/context/AuthContext';
 
@@ -91,5 +91,57 @@ describe('DiscoverPage', () => {
     await waitFor(() => expect(screen.getByText('Alice')).toBeInTheDocument());
     expect(screen.getByText('3 tips received')).toBeInTheDocument();
     expect(screen.queryByText('No creators yet')).not.toBeInTheDocument();
+  });
+  describe('load more', () => {
+    const creator = (id: number) => ({
+      id,
+      username: `creator${id}`,
+      displayName: `Creator ${id}`,
+      bio: null,
+      avatarUrl: null,
+      _count: { donations: 0 },
+    });
+    const page = (items: unknown[], pageNum: number) =>
+      jsonResponse({ items, pagination: { page: pageNum, limit: 20, total: 2, totalPages: 2 } });
+
+    it('shows an error when loading more fails, keeps loaded results, and retries the same page', async () => {
+      vi.mocked(fetch)
+        .mockResolvedValueOnce(page([creator(1)], 1))
+        .mockResolvedValueOnce(jsonResponse({}, false, 500))
+        .mockResolvedValueOnce(page([creator(2)], 2));
+
+      render(<DiscoverPage />);
+      await waitFor(() => expect(screen.getByText('Creator 1')).toBeInTheDocument());
+
+      fireEvent.click(screen.getByRole('button', { name: 'Load more' }));
+
+      expect(await screen.findByRole('alert')).toHaveTextContent(/couldn't load more creators/i);
+      expect(screen.getByText('Creator 1')).toBeInTheDocument();
+
+      fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
+
+      await waitFor(() => expect(screen.getByText('Creator 2')).toBeInTheDocument());
+      expect(screen.getByText('Creator 1')).toBeInTheDocument();
+      expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+
+      // Both attempts asked for page 2.
+      const urls = vi.mocked(fetch).mock.calls.map(([url]) => String(url));
+      expect(urls[1]).toContain('page=2');
+      expect(urls[2]).toContain('page=2');
+    });
+
+    it('shows an error when the load-more request throws (network failure)', async () => {
+      vi.mocked(fetch)
+        .mockResolvedValueOnce(page([creator(1)], 1))
+        .mockRejectedValueOnce(new TypeError('Failed to fetch'));
+
+      render(<DiscoverPage />);
+      await waitFor(() => expect(screen.getByText('Creator 1')).toBeInTheDocument());
+
+      fireEvent.click(screen.getByRole('button', { name: 'Load more' }));
+
+      expect(await screen.findByRole('alert')).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'Retry' })).toBeEnabled();
+    });
   });
 });

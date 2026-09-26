@@ -2,6 +2,7 @@ import type { Metadata, Viewport } from "next";
 import { Geist, Geist_Mono, Space_Grotesk } from "next/font/google";
 import "./globals.css";
 import { AuthProvider } from "@/context/AuthContext";
+import { CreatorProvider } from "@/context/CreatorContext";
 import { ThemeProvider } from "@/context/ThemeContext";
 import { AppToaster } from "@/components/AppToaster";
 import { OfflineBanner } from "@/components/OfflineBanner";
@@ -19,7 +20,7 @@ const geistMono = Geist_Mono({
 const spaceGrotesk = Space_Grotesk({
   variable: "--font-display",
   subsets: ["latin"],
-  weight: ["500", "600", "700", "800"],
+  weight: ["300", "400", "500", "600", "700"],
 });
 
 const baseUrl = process.env.NEXT_PUBLIC_SITE_URL || 'https://support-mee.vercel.app';
@@ -66,7 +67,9 @@ export default function RootLayout({
         <OfflineBanner />
         <ThemeProvider>
           <AuthProvider>
-            {children}
+            <CreatorProvider>
+              {children}
+            </CreatorProvider>
           </AuthProvider>
           <AppToaster />
         </ThemeProvider>

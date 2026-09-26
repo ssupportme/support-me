@@ -18,8 +18,42 @@ import { errorHandler } from "./middleware/errorHandler";
 import { requestLogger } from "./middleware/requestLogger";
 import { checkSorobanRpc } from "./services/sorobanHealth";
 import { executorHealth } from "./services/executorHealth";
+import { getAllowedOrigins } from "./config";
 
 const app = express();
+
+/**
+ * CORS is restricted to an explicit allowlist of frontend origins (#179).
+ *
+ * The default `cors()` reflects any request's Origin, which lets any
+ * third-party page make authenticated API calls using a token held in
+ * browser JS storage and read the responses back. Resolving the allowlist
+ * per request (rather than once at import) keeps it configurable from the
+ * environment without a code change, so preview and staging domains can be
+ * added by configuration alone.
+ *
+ * A request with no Origin header (server-to-server calls, curl, health
+ * probes) is allowed through: the browser always sends Origin on a
+ * cross-origin request, so its absence cannot be attacker-controlled from
+ * a page.
+ */
+const corsOptions: cors.CorsOptions = {
+  origin(origin, callback) {
+    // Same-origin and non-browser callers send no Origin header.
+    if (!origin) return callback(null, true);
+
+    const allowed = getAllowedOrigins();
+    if (allowed.includes(origin.replace(/\/$/, ""))) {
+      return callback(null, true);
+    }
+    // Returning an error rejects the request without echoing the
+    // untrusted origin back in Access-Control-Allow-Origin.
+    return callback(new Error(`Origin not allowed by CORS: ${origin}`));
+  },
+  credentials: true,
+  methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+  allowedHeaders: ["Content-Type", "Authorization", "Idempotency-Key"],
+};
 
 // Initialize Sentry if DSN is configured
 if (process.env.SENTRY_DSN) {
@@ -38,7 +72,7 @@ if (process.env.TRUST_PROXY) {
 }
 
 app.use(requestLogger);
-app.use(cors());
+app.use(cors(corsOptions));
 
 // Mounted with express.raw() ahead of the global express.json() below: Svix
 // signature verification (see routes/emailWebhooks.ts) needs the exact raw

@@ -333,7 +333,19 @@ export class SubscriptionExecutor {
   }
 
   private async confirm(hash: string): Promise<string> {
-    for (let i = 0; i < 30; i++) {
+    // Soroban RPC calls already retry transient failures internally (see
+    // services/retry.ts), so this loop only handles the normal case of a
+    // transaction that is submitted but not yet included in a ledger. The
+    // poll interval grows between attempts so a slow inclusion doesn't turn
+    // into a tight loop against the provider, while the overall confirmation
+    // window stays bounded at ~30s.
+    const POLL_INTERVAL_MS = 1_000;
+    const MAX_POLL_INTERVAL_MS = 8_000;
+    const MAX_WAIT_MS = 30_000;
+    const startedAt = Date.now();
+    let intervalMs = POLL_INTERVAL_MS;
+
+    for (;;) {
       const result = await withSorobanRpcServer("getTransaction", (server) =>
         server.getTransaction(hash)
       );
@@ -341,8 +353,13 @@ export class SubscriptionExecutor {
       if (result.status === "FAILED") {
         throw new Error(`Transaction ${hash} failed on-chain`);
       }
-      await new Promise((resolve) => setTimeout(resolve, 1000));
+
+      const elapsed = Date.now() - startedAt;
+      if (elapsed + intervalMs >= MAX_WAIT_MS) break;
+      await new Promise((resolve) => setTimeout(resolve, intervalMs));
+      intervalMs = Math.min(intervalMs * 2, MAX_POLL_INTERVAL_MS);
     }
+
     throw new Error(`Transaction ${hash} did not confirm within 30s`);
   }
 }

@@ -16,13 +16,19 @@ vi.mock('next/image', () => ({
   default: (props: any) => <img {...props} />,
 }));
 
-vi.mock('@/lib/contract', () => ({
-  sendDonation: vi.fn(),
-  approveAllowance: vi.fn(),
-  subscribe: vi.fn(),
-  DonationError: class extends Error {},
-  MAX_CHARGE_INTERVAL_DAYS: 365,
-}));
+// Only the network-touching calls are stubbed; the shared constants (message
+// length cap, charge interval cap) come from the real module so the component
+// and the test can't drift apart on a new export.
+vi.mock('@/lib/contract', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/lib/contract')>();
+  return {
+    ...actual,
+    sendDonation: vi.fn(),
+    approveAllowance: vi.fn(),
+    subscribe: vi.fn(),
+    cancelSubscription: vi.fn(),
+  };
+});
 
 vi.mock('@/lib/wallet', () => ({
   connectWallet: vi.fn().mockResolvedValue('GBTESTWALLETADDRESS123456789012345678901234567890'),

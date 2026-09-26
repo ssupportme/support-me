@@ -11,4 +11,5 @@ vi.mock('@/lib/wallet', () => ({
 vi.mock('next/font/google', () => ({
   Geist: () => ({ variable: '--font-geist-sans' }),
   Geist_Mono: () => ({ variable: '--font-geist-mono' }),
+  Space_Grotesk: () => ({ variable: '--font-display' }),
 }));

@@ -3,6 +3,7 @@ jest.mock("../../prisma", () => ({
   default: {
     creator: {
       findUnique: jest.fn(),
+      findFirst: jest.fn(),
     },
     user: {
       findUnique: jest.fn(),
@@ -38,7 +39,7 @@ import prisma from "../../prisma";
 import { sendEmail } from "../../services/email/mailer";
 
 const mockedPrisma = prisma as unknown as {
-  creator: { findUnique: jest.Mock };
+  creator: { findUnique: jest.Mock; findFirst: jest.Mock };
   user: { findUnique: jest.Mock };
   donation: { findMany: jest.Mock; count: jest.Mock; create: jest.Mock; upsert: jest.Mock };
   donationIdempotencyKey: {
@@ -62,11 +63,17 @@ beforeEach(() => {
   mockedPrisma.donation.count.mockResolvedValue(0);
   mockedPrisma.donationIdempotencyKey.findMany.mockResolvedValue([]);
   mockedPrisma.donationIdempotencyKey.findUnique.mockResolvedValue(null);
+  // No expired idempotency keys to clean up unless a test says otherwise.
+  mockedPrisma.donationIdempotencyKey.findMany.mockResolvedValue([]);
+  mockedPrisma.donationIdempotencyKey.deleteMany.mockResolvedValue({ count: 0 });
   // Default: the second creator.findUnique call inside notifyDonationReceived
   // (keyed by id, with the user relation included) finds nothing, and the
   // supporter's wallet address is unknown — both notifications degrade to
   // "no recipient" rather than throwing, unless a test overrides this.
   mockedPrisma.user.findUnique.mockResolvedValue(null);
+  // The supporter is not itself a known creator, so receipts fall back to the
+  // truncated address rather than a display name.
+  mockedPrisma.creator.findFirst.mockResolvedValue(null);
   mockedSendEmail.mockResolvedValue(undefined);
   // No matching active goals by default — applyDonationToGoals is a no-op
   // unless a test explicitly sets up goals to be updated.
@@ -359,6 +366,9 @@ describe("POST /api/donations", () => {
       currency: "XLM",
       message: "nice work",
       transactionHash: null,
+      // The receipt template formats this date; without it rendering throws
+      // and the (deliberately non-fatal) notification is skipped.
+      createdAt: new Date("2026-08-01T00:00:00.000Z"),
     };
 
     function mockCreatorLookups(withEmail: boolean) {
@@ -459,7 +469,10 @@ describe("POST /api/donations", () => {
       });
 
       expect(res.status).toBe(201);
-      expect(res.body).toEqual(created);
+      // The donation is already committed, so the client still gets it back —
+      // compared through JSON because createdAt is a Date in the fixture and
+      // a string once it has crossed the HTTP boundary.
+      expect(res.body).toEqual(JSON.parse(JSON.stringify(created)));
     });
   });
 });

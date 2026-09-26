@@ -5,7 +5,7 @@ import Image from 'next/image';
 import * as StellarSdk from '@stellar/stellar-sdk';
 import { notify } from '@/lib/notify';
 import { HugeiconsIcon } from '@hugeicons/react';
-import { PartyIcon, TwitterLogoIcon, LinkIcon } from '@hugeicons/core-free-icons';
+import { PartyIcon, TwitterIcon, LinkIcon } from '@hugeicons/core-free-icons';
 import { connectWallet } from '@/lib/wallet';
 import {
   categorizeWalletError,
@@ -75,6 +75,8 @@ export default function CreatorProfileClient({ params }: { params: Promise<{ use
   const { token, loginWithWallet } = useAuth();
   const [creator, setCreator] = useState<Creator | null>(null);
   const [goals, setGoals] = useState<Goal[]>([]);
+  // 'paused' = the SSE stream dropped and the browser is retrying.
+  const [liveStatus, setLiveStatus] = useState<'connecting' | 'live' | 'paused'>('connecting');
   const [loading, setLoading] = useState(true);
   const [notFound, setNotFound] = useState(false);
 
@@ -162,11 +164,15 @@ export default function CreatorProfileClient({ params }: { params: Promise<{ use
   }, [assetCodes, assetCode]);
 
   // Subscribe to the backend's SSE stream so a live donation bumps the goal
-  // progress without a refresh.
+  // progress without a refresh. The stream is closed while the tab is hidden
+  // (so many open profile tabs don't each hold a connection), and whenever it
+  // is re-established after an error or a hidden period the goals are refetched
+  // to backfill anything that arrived while it was down.
   useEffect(() => {
     if (!creator?.walletAddress) return;
 
-    const source = new EventSource(`${API_URL}/api/events`);
+    let source: EventSource | null = null;
+    let needsBackfill = false;
 
     const handleDonation = (event: MessageEvent) => {
       let payload: { creator: string };
@@ -183,11 +189,47 @@ export default function CreatorProfileClient({ params }: { params: Promise<{ use
       void fetchGoals();
     };
 
-    source.addEventListener('donation', handleDonation);
+    const open = () => {
+      if (source) return;
+      setLiveStatus('connecting');
+      const next = new EventSource(`${API_URL}/api/events`);
+      next.onopen = () => {
+        setLiveStatus('live');
+        if (needsBackfill) {
+          needsBackfill = false;
+          void fetchGoals();
+        }
+      };
+      next.onerror = () => {
+        needsBackfill = true;
+        setLiveStatus('paused');
+      };
+      next.addEventListener('donation', handleDonation);
+      source = next;
+    };
 
-    return () => {
+    const close = () => {
+      if (!source) return;
       source.removeEventListener('donation', handleDonation);
       source.close();
+      source = null;
+    };
+
+    const handleVisibilityChange = () => {
+      if (document.hidden) {
+        close();
+      } else {
+        needsBackfill = true;
+        open();
+      }
+    };
+
+    if (!document.hidden) open();
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+      close();
     };
   }, [creator?.walletAddress, fetchGoals]);
 
@@ -519,7 +561,7 @@ export default function CreatorProfileClient({ params }: { params: Promise<{ use
               className="btn-brutal btn-brutal-white px-3 py-2 text-sm flex items-center gap-2"
               aria-label="Share on X/Twitter"
             >
-              <HugeiconsIcon icon={TwitterLogoIcon} size={18} strokeWidth={2} />
+              <HugeiconsIcon icon={TwitterIcon} size={18} strokeWidth={2} />
               Share
             </button>
             <button
@@ -531,6 +573,12 @@ export default function CreatorProfileClient({ params }: { params: Promise<{ use
               Copy Link
             </button>
           </div>
+
+          {liveStatus === 'paused' && (
+            <p role="status" className="mt-4 text-xs font-bold text-ink">
+              Live updates paused — reconnecting…
+            </p>
+          )}
 
           {goals.length > 0 && (
             <div className="mt-6 pt-6 border-t-2 border-ink text-left space-y-4">
@@ -597,7 +645,7 @@ export default function CreatorProfileClient({ params }: { params: Promise<{ use
             <button
               onClick={handleConnectWallet}
               disabled={connecting}
-              className="btn-brutal btn-brutal-primary w-full"
+              className="btn-brutal btn-brutal-primary w-full min-h-[48px]"
             >
               {connecting ? 'Connecting…' : 'Connect Wallet'}
             </button>
@@ -624,7 +672,7 @@ export default function CreatorProfileClient({ params }: { params: Promise<{ use
                           }
                         }}
                         aria-pressed={assetCode === code}
-                        className={`btn-brutal text-sm px-0 py-2 ${
+                        className={`btn-brutal text-sm px-0 py-2 min-h-[44px] ${
                           assetCode === code ? 'btn-brutal-primary' : 'btn-brutal-white'
                         }`}
                       >
@@ -667,7 +715,7 @@ export default function CreatorProfileClient({ params }: { params: Promise<{ use
                         <button
                           key={preset}
                           onClick={() => setDonationAmount(preset)}
-                          className={`btn-brutal text-sm px-0 py-2 ${
+                          className={`btn-brutal text-sm px-0 py-2 min-h-[44px] ${
                             donationAmount === preset ? 'btn-brutal-primary' : 'btn-brutal-white'
                           }`}
                         >
@@ -708,7 +756,7 @@ export default function CreatorProfileClient({ params }: { params: Promise<{ use
                           <select
                             value={intervalChoice}
                             onChange={(e) => setIntervalChoice(e.target.value as typeof intervalChoice)}
-                            className="input-brutal text-sm py-1.5 w-auto"
+                            className="input-brutal text-sm py-1.5 w-auto min-h-[44px]"
                           >
                             <option value="7">Weekly</option>
                             <option value="30">Monthly</option>
@@ -724,7 +772,7 @@ export default function CreatorProfileClient({ params }: { params: Promise<{ use
                               onChange={(e) => setCustomDays(e.target.value)}
                               aria-label="Days between charges"
                               title={`Up to ${MAX_CHARGE_INTERVAL_DAYS} days`}
-                              className="input-brutal text-sm py-1.5 w-14"
+                              className="input-brutal text-sm py-1.5 w-14 min-h-[44px]"
                             />
                           )}
                         </div>

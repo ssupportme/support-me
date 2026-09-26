@@ -11,6 +11,10 @@ jest.mock("../../prisma", () => ({
     donation: {
       groupBy: jest.fn(),
     },
+    subscription: {
+      count: jest.fn(),
+      findMany: jest.fn(),
+    },
     adminAuditLog: {
       create: jest.fn(),
       findMany: jest.fn(),
@@ -28,6 +32,7 @@ const mockedPrisma = prisma as unknown as {
   user: { count: jest.Mock; findMany: jest.Mock };
   creator: { count: jest.Mock };
   donation: { groupBy: jest.Mock };
+  subscription: { count: jest.Mock; findMany: jest.Mock };
   adminAuditLog: { create: jest.Mock; findMany: jest.Mock; count: jest.Mock };
 };
 
@@ -43,6 +48,8 @@ describe("GET /api/admin/overview", () => {
     mockedPrisma.adminAuditLog.create.mockResolvedValue({ id: 1 });
     mockedPrisma.adminAuditLog.findMany.mockResolvedValue([]);
     mockedPrisma.adminAuditLog.count.mockResolvedValue(0);
+    mockedPrisma.subscription.count.mockResolvedValue(0);
+    mockedPrisma.subscription.findMany.mockResolvedValue([]);
   });
 
   afterAll(() => {

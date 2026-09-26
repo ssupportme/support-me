@@ -12,36 +12,27 @@ import {
   Copy01Icon,
 } from '@hugeicons/core-free-icons';
 import { useAuth } from '@/context/AuthContext';
+import { useCreator } from '@/context/CreatorContext';
 import { ProtectedRoute } from '@/components/ProtectedRoute';
 import { AppNav } from '@/components/AppNav';
 import { Skeleton } from '@/components/Skeleton';
 import { usePrices } from '@/lib/usePrices';
 import { formatUsd } from '@/lib/prices';
 import { availableAssetCodes, getAsset } from '@/lib/assets';
-import { API_URL } from '@/lib/api';
 import { ShareModal } from '@/components/ShareModal';
 
 const HORIZON_URL = 'https://horizon-testnet.stellar.org';
 const server = new StellarSdk.Horizon.Server(HORIZON_URL);
-
-interface Creator {
-  id: number;
-  userId: number;
-  username: string;
-  displayName: string;
-  walletAddress: string;
-}
 
 // The balance we hold per asset code, as a Horizon-precision string. `null`
 // means "not loaded / no trustline" and renders as a dash.
 type Balances = Record<string, string | null>;
 
 export default function AppHubPage() {
-  const { user, token } = useAuth();
+  const { user } = useAuth();
+  const { creator, loading } = useCreator();
   const prices = usePrices();
 
-  const [creator, setCreator] = useState<Creator | null>(null);
-  const [loading, setLoading] = useState(true);
   const [balances, setBalances] = useState<Balances>({});
   const [balancesLoading, setBalancesLoading] = useState(true);
   const [hidden, setHidden] = useState(true);
@@ -78,31 +69,6 @@ export default function AppHubPage() {
   // a loop (availableAssetCodes returns a fresh array each call).
   const assetCodes = useMemo(() => availableAssetCodes(), []);
   const walletAddress = user?.walletAddress || '';
-
-  // Resolve the creator profile tied to the signed-in wallet so we can show the
-  // greeting and the shareable profile link.
-  useEffect(() => {
-    const fetchCreator = async () => {
-      if (!user || !token) return;
-      try {
-        const res = await fetch(`${API_URL}/api/creators/me`, {
-          headers: { Authorization: `Bearer ${token}` },
-        });
-        if (res.status === 404) {
-          // Signed in, but hasn't finished claiming a username yet.
-          setCreator(null);
-          return;
-        }
-        if (!res.ok) throw new Error('Failed to load your profile');
-        setCreator(await res.json());
-      } catch (err) {
-        notify.error('Could not load your profile', err);
-      } finally {
-        setLoading(false);
-      }
-    };
-    fetchCreator();
-  }, [user, token]);
 
   // Read on-chain balances for every supported asset in one account load, so
   // the aggregate figure reflects what's actually in the wallet.

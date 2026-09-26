@@ -1279,4 +1279,184 @@ mod tests {
         let result = donation_client.try_charge_subscription(&executor, &id);
         assert_eq!(result.unwrap_err().unwrap(), ChargeError::InsufficientBalance);
     }
+
+    // --- charge_subscription edge cases ---------------------------------
+
+    /// Registers a token, mints `balance` to the supporter, sets an executor and
+    /// creates a 500-per-1_000s subscription at t=1_000 with `allowance` approved.
+    fn subscription_fixture(
+        env: &Env,
+        balance: i128,
+        allowance: i128,
+    ) -> (
+        Address,
+        DonationContractClient<'_>,
+        Address,
+        Address,
+        Address,
+        Address,
+        u64,
+    ) {
+        let (admin, donation_client, _registry_client) = setup(env);
+        let supporter = Address::generate(env);
+        let creator = Address::generate(env);
+        let executor = Address::generate(env);
+        let token_address = create_token_contract(env, &admin);
+        donation_client.add_allowed_token(&token_address);
+        StellarAssetClient::new(env, &token_address).mint(&supporter, &balance);
+
+        env.ledger().with_mut(|li| li.timestamp = 1_000);
+        donation_client.set_executor(&executor);
+        let id = donation_client.subscribe(&supporter, &creator, &token_address, &500, &1_000);
+        token::Client::new(env, &token_address).approve(
+            &supporter,
+            &donation_client.address,
+            &allowance,
+            &1_000,
+        );
+        (admin, donation_client, supporter, creator, executor, token_address, id)
+    }
+
+    #[test]
+    fn test_charge_subscription_succeeds_exactly_at_due_time() {
+        let env = Env::default();
+        env.mock_all_auths_allowing_non_root_auth();
+        let (_admin, donation_client, _supporter, creator, executor, token_address, id) =
+            subscription_fixture(&env, 10_000, 500);
+
+        // next_charge_at is 1_000 + 1_000; a charge at exactly that timestamp is due.
+        env.ledger().with_mut(|li| li.timestamp = 2_000);
+        donation_client.charge_subscription(&executor, &id);
+
+        assert_eq!(token::Client::new(&env, &token_address).balance(&creator), 500);
+    }
+
+    #[test]
+    #[should_panic(expected = "subscription not yet due")]
+    fn test_charge_subscription_cannot_charge_twice_in_one_period() {
+        let env = Env::default();
+        env.mock_all_auths_allowing_non_root_auth();
+        let (_admin, donation_client, _supporter, _creator, executor, _token, id) =
+            subscription_fixture(&env, 10_000, 1_000);
+
+        env.ledger().with_mut(|li| li.timestamp = 2_000);
+        donation_client.charge_subscription(&executor, &id);
+        // Same ledger time: the schedule has moved to 3_000, so this must be rejected.
+        donation_client.charge_subscription(&executor, &id);
+    }
+
+    #[test]
+    fn test_charge_subscription_late_charge_reschedules_from_now() {
+        let env = Env::default();
+        env.mock_all_auths_allowing_non_root_auth();
+        let (_admin, donation_client, _supporter, _creator, executor, _token, id) =
+            subscription_fixture(&env, 10_000, 500);
+
+        // Executor is 5_000s late (due at 2_000); the next charge is measured
+        // from the actual charge time, so missed periods are not back-charged.
+        env.ledger().with_mut(|li| li.timestamp = 7_000);
+        donation_client.charge_subscription(&executor, &id);
+
+        let subscription = donation_client.get_subscription(&id).unwrap();
+        assert_eq!(subscription.next_charge_at, 7_000 + 1_000);
+        assert!(subscription.active);
+    }
+
+    #[test]
+    fn test_charge_subscription_failed_charge_leaves_schedule_and_balances_unchanged() {
+        let env = Env::default();
+        env.mock_all_auths_allowing_non_root_auth();
+        let (_admin, donation_client, supporter, creator, executor, token_address, id) =
+            subscription_fixture(&env, 10_000, 100);
+
+        env.ledger().with_mut(|li| li.timestamp = 2_000);
+        let result = donation_client.try_charge_subscription(&executor, &id);
+        assert_eq!(result.unwrap_err().unwrap(), ChargeError::InsufficientAllowance);
+
+        // A failed attempt must not advance the schedule, so it can be retried
+        // as soon as the supporter fixes their allowance.
+        let subscription = donation_client.get_subscription(&id).unwrap();
+        assert_eq!(subscription.next_charge_at, 2_000);
+        assert!(subscription.active);
+        let token_client = token::Client::new(&env, &token_address);
+        assert_eq!(token_client.balance(&supporter), 10_000);
+        assert_eq!(token_client.balance(&creator), 0);
+    }
+
+    #[test]
+    fn test_charge_subscription_retry_succeeds_after_allowance_topped_up() {
+        let env = Env::default();
+        env.mock_all_auths_allowing_non_root_auth();
+        let (_admin, donation_client, supporter, creator, executor, token_address, id) =
+            subscription_fixture(&env, 10_000, 100);
+
+        env.ledger().with_mut(|li| li.timestamp = 2_000);
+        assert!(donation_client.try_charge_subscription(&executor, &id).is_err());
+
+        let token_client = token::Client::new(&env, &token_address);
+        token_client.approve(&supporter, &donation_client.address, &500, &1_000);
+        donation_client.charge_subscription(&executor, &id);
+
+        assert_eq!(token_client.balance(&creator), 500);
+    }
+
+    #[test]
+    #[should_panic(expected = "subscription not found")]
+    fn test_charge_subscription_rejects_unknown_subscription() {
+        let env = Env::default();
+        env.mock_all_auths_allowing_non_root_auth();
+        let (_admin, donation_client, _supporter, _creator, executor, _token, _id) =
+            subscription_fixture(&env, 10_000, 500);
+
+        donation_client.charge_subscription(&executor, &999);
+    }
+
+    #[test]
+    #[should_panic(expected = "contract is currently paused")]
+    fn test_charge_subscription_rejects_while_paused() {
+        let env = Env::default();
+        env.mock_all_auths_allowing_non_root_auth();
+        let (admin, donation_client, _supporter, _creator, executor, _token, id) =
+            subscription_fixture(&env, 10_000, 500);
+
+        donation_client.emergency_pause(&admin);
+        env.ledger().with_mut(|li| li.timestamp = 2_000);
+        donation_client.charge_subscription(&executor, &id);
+    }
+
+    #[test]
+    #[should_panic(expected = "Subscription amount must be positive")]
+    fn test_subscribe_rejects_zero_amount() {
+        let env = Env::default();
+        env.mock_all_auths_allowing_non_root_auth();
+        let (admin, donation_client, _registry_client) = setup(&env);
+        let token_address = create_token_contract(&env, &admin);
+        donation_client.add_allowed_token(&token_address);
+
+        donation_client.subscribe(
+            &Address::generate(&env),
+            &Address::generate(&env),
+            &token_address,
+            &0,
+            &1_000,
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "Interval must be positive")]
+    fn test_subscribe_rejects_zero_interval() {
+        let env = Env::default();
+        env.mock_all_auths_allowing_non_root_auth();
+        let (admin, donation_client, _registry_client) = setup(&env);
+        let token_address = create_token_contract(&env, &admin);
+        donation_client.add_allowed_token(&token_address);
+
+        donation_client.subscribe(
+            &Address::generate(&env),
+            &Address::generate(&env),
+            &token_address,
+            &500,
+            &0,
+        );
+    }
 }
