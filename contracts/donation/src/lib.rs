@@ -445,6 +445,14 @@ impl DonationContract {
     }
 
     /// Fetch a single donation record by its counter-based index.
+    /// 
+    /// NOTE: Donation records are subject to Soroban's state expiry. 
+    /// Because the on-chain donation log is append-only and grows indefinitely, 
+    /// the contract does not explicitly extend the TTL of these records to save 
+    /// on state rent. If a record has expired, this function will return `None`.
+    /// Downstream applications should rely on off-chain indexed `DonatedEvent`s 
+    /// as the canonical historical record, rather than depending on this function
+    /// for long-term historical data.
     pub fn get_donation(env: Env, index: u32) -> Option<DonationRecord> {
         env.storage().persistent().get(&(DONATIONS_KEY, index))
     }
