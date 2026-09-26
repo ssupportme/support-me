@@ -2,6 +2,11 @@ import { Request, Response, NextFunction } from 'express';
 import * as jwt from 'jsonwebtoken';
 import { UnauthorizedError } from '../errors/AppError';
 
+// Fail fast if JWT_SECRET is missing in non-test environments
+if (process.env.NODE_ENV !== 'test' && !process.env.JWT_SECRET) {
+  throw new Error('JWT_SECRET must be set in non-test environments');
+}
+
 export interface AuthRequest extends Request {
   user?: {
     id: number;
@@ -23,7 +28,7 @@ export const authMiddleware = (req: AuthRequest, res: Response, next: NextFuncti
   }
 
   try {
-    const decoded = jwt.verify(token, process.env.JWT_SECRET || 'your-secret-key') as {
+    const decoded = jwt.verify(token, process.env.JWT_SECRET!) as {
       id: number;
       walletAddress: string | null;
     };
@@ -37,7 +42,8 @@ export const authMiddleware = (req: AuthRequest, res: Response, next: NextFuncti
 export const generateToken = (userId: number, walletAddress: string | null): string => {
   return jwt.sign(
     { id: userId, walletAddress },
-    process.env.JWT_SECRET || 'your-secret-key',
+    process.env.JWT_SECRET!,
     { expiresIn: '7d' }
   );
 };
+
