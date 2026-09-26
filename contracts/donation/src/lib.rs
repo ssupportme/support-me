@@ -566,6 +566,10 @@ mod tests {
             &String::from_bytes(&env, b"First!"),
         );
 
+        assert!(registry_client.get_creator(&creator).is_none());
+
+        donation_client.register_creator(&creator, &String::from_bytes(&env, b"new_dev"));
+
         let stats = registry_client.get_creator(&creator).unwrap();
         assert_eq!(stats.total_donations, 250);
         assert_eq!(stats.donation_count, 1);
