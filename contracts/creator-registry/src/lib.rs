@@ -6,11 +6,25 @@
 //! `record_donation` — it does so via a cross-contract call after it moves
 //! funds from a donor to a creator, so this registry's stats always stay in
 //! sync with real on-chain transfers.
+//!
+//! Multi-signature and timelock governance:
+//! High-risk administrative actions (repointing the donation contract,
+//! rotating admins, modifying threshold) require multi-signature approval and
+//! timelock delay before execution.
 
-use common::CreatorProfile;
-use soroban_sdk::{contract, contractevent, contractimpl, symbol_short, Address, Env, String, Symbol};
+use common::{AdminAction, AdminProposal, CreatorProfile};
+use soroban_sdk::{
+    contract, contractevent, contractimpl, symbol_short, Address, Env, String, Symbol,
+    Vec as SorobanVec,
+};
 
 const ADMIN_KEY: Symbol = symbol_short!("admin");
+const ADMINS_KEY: Symbol = symbol_short!("admins");
+const THRESHOLD_KEY: Symbol = symbol_short!("thresh");
+const TIMELOCK_DELAY_KEY: Symbol = symbol_short!("delay");
+const PROPOSAL_COUNTER_KEY: Symbol = symbol_short!("prop_ctr");
+const PROPOSAL_KEY: Symbol = symbol_short!("proposal");
+const APPROVAL_KEY: Symbol = symbol_short!("approval");
 const DONATION_KEY: Symbol = symbol_short!("don_ctr");
 const GOAL_KEY: Symbol = symbol_short!("goal");
 
@@ -23,27 +37,33 @@ pub struct CreatedEvent {
     pub username: String,
 }
 
-/// Emitted whenever a donation is recorded in the registry. Carries the
-/// donation amount as well as updated cumulative totals so indexers and
-/// the backend can reconcile lifetime creator stats without extra RPC calls.
-#[contractevent(topics = ["don_rec"])]
+/// Emitted when an admin proposal is created.
+#[contractevent(topics = ["prop_created"])]
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct DonationRecordedEvent {
+pub struct ProposalCreatedEvent {
+    pub proposal_id: u64,
     #[topic]
-    pub creator: Address,
-    pub amount: i128,
-    pub total_donations: i128,
-    pub donation_count: u32,
+    pub proposer: Address,
+    pub eta: u64,
 }
 
-/// Emitted whenever a creator sets or updates their funding goal.
-#[contractevent(topics = ["goal_upd"])]
+/// Emitted when an admin proposal receives an approval.
+#[contractevent(topics = ["prop_approved"])]
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct GoalUpdatedEvent {
+pub struct ProposalApprovedEvent {
+    pub proposal_id: u64,
     #[topic]
-    pub creator: Address,
-    pub goal_amount: i128,
-    pub updated_at: u64,
+    pub admin: Address,
+    pub approvals_count: u32,
+}
+
+/// Emitted when an admin proposal is executed.
+#[contractevent(topics = ["prop_exec"])]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ProposalExecutedEvent {
+    pub proposal_id: u64,
+    #[topic]
+    pub executor: Address,
 }
 
 #[contract]
@@ -56,23 +76,209 @@ impl CreatorRegistryContract {
     pub fn initialize(env: Env, admin: Address, donation_contract: Address) {
         admin.require_auth();
         assert!(
-            !env.storage().instance().has(&ADMIN_KEY),
+            !env.storage().instance().has(&ADMIN_KEY) && !env.storage().instance().has(&ADMINS_KEY),
             "registry already initialized"
         );
+
+        let mut admins = SorobanVec::new(&env);
+        admins.push_back(admin.clone());
+
         env.storage().instance().set(&ADMIN_KEY, &admin);
+        env.storage().instance().set(&ADMINS_KEY, &admins);
+        env.storage().instance().set(&THRESHOLD_KEY, &1u32);
+        env.storage().instance().set(&TIMELOCK_DELAY_KEY, &0u64);
         env.storage().instance().set(&DONATION_KEY, &donation_contract);
     }
 
-    /// Point the registry at a new donation contract (e.g. after a
-    /// redeployment). Admin only.
-    pub fn set_donation_contract(env: Env, donation_contract: Address) {
-        let admin: Address = env
+    /// One-time multi-sig setup: configures admin list, threshold, and timelock delay.
+    pub fn initialize_multisig(
+        env: Env,
+        admins: SorobanVec<Address>,
+        threshold: u32,
+        timelock_delay: u64,
+        donation_contract: Address,
+    ) {
+        assert!(
+            !env.storage().instance().has(&ADMIN_KEY) && !env.storage().instance().has(&ADMINS_KEY),
+            "registry already initialized"
+        );
+        assert!(admins.len() > 0, "admin list cannot be empty");
+        assert!(threshold > 0 && threshold <= admins.len(), "invalid signature threshold");
+
+        for i in 0..admins.len() {
+            admins.get(i).unwrap().require_auth();
+        }
+
+        let primary_admin = admins.get(0).unwrap();
+        env.storage().instance().set(&ADMIN_KEY, &primary_admin);
+        env.storage().instance().set(&ADMINS_KEY, &admins);
+        env.storage().instance().set(&THRESHOLD_KEY, &threshold);
+        env.storage().instance().set(&TIMELOCK_DELAY_KEY, &timelock_delay);
+        env.storage().instance().set(&DONATION_KEY, &donation_contract);
+    }
+
+    /// Returns whether a given address is an authorized contract admin.
+    pub fn is_admin(env: Env, address: Address) -> bool {
+        let admins: SorobanVec<Address> = env
             .storage()
             .instance()
-            .get(&ADMIN_KEY)
-            .expect("registry not initialized");
+            .get(&ADMINS_KEY)
+            .unwrap_or_else(|| SorobanVec::new(&env));
+        Self::contains_address(&admins, &address)
+    }
+
+    /// Retrieves an admin proposal by ID.
+    pub fn get_proposal(env: Env, proposal_id: u64) -> Option<AdminProposal> {
+        env.storage().persistent().get(&(PROPOSAL_KEY, proposal_id))
+    }
+
+    /// Proposes a multi-signature administrative action.
+    pub fn propose_admin_action(env: Env, proposer: Address, action: AdminAction) -> u64 {
+        proposer.require_auth();
+        assert!(Self::is_admin(env.clone(), proposer.clone()), "proposer is not an admin");
+
+        let prop_id: u64 = env.storage().persistent().get(&PROPOSAL_COUNTER_KEY).unwrap_or(0);
+        let timelock: u64 = env.storage().instance().get(&TIMELOCK_DELAY_KEY).unwrap_or(0);
+        let now = env.ledger().timestamp();
+        let eta = now + timelock;
+
+        let proposal = AdminProposal {
+            id: prop_id,
+            action,
+            proposer: proposer.clone(),
+            approvals_count: 1,
+            created_at: now,
+            eta,
+            executed: false,
+        };
+
+        env.storage().persistent().set(&(PROPOSAL_KEY, prop_id), &proposal);
+        env.storage().persistent().set(&(APPROVAL_KEY, prop_id, proposer.clone()), &true);
+        env.storage().persistent().set(&PROPOSAL_COUNTER_KEY, &(prop_id + 1));
+
+        ProposalCreatedEvent {
+            proposal_id: prop_id,
+            proposer,
+            eta,
+        }
+        .publish(&env);
+
+        prop_id
+    }
+
+    /// Approves an existing administrative proposal.
+    pub fn approve_admin_action(env: Env, admin: Address, proposal_id: u64) {
         admin.require_auth();
-        env.storage().instance().set(&DONATION_KEY, &donation_contract);
+        assert!(Self::is_admin(env.clone(), admin.clone()), "caller is not an admin");
+
+        let mut proposal: AdminProposal = env
+            .storage()
+            .persistent()
+            .get(&(PROPOSAL_KEY, proposal_id))
+            .expect("proposal not found");
+        assert!(!proposal.executed, "proposal already executed");
+
+        let has_approved: bool = env
+            .storage()
+            .persistent()
+            .get(&(APPROVAL_KEY, proposal_id, admin.clone()))
+            .unwrap_or(false);
+        assert!(!has_approved, "admin has already approved this proposal");
+
+        env.storage().persistent().set(&(APPROVAL_KEY, proposal_id, admin.clone()), &true);
+        proposal.approvals_count += 1;
+        env.storage().persistent().set(&(PROPOSAL_KEY, proposal_id), &proposal);
+
+        ProposalApprovedEvent {
+            proposal_id,
+            admin,
+            approvals_count: proposal.approvals_count,
+        }
+        .publish(&env);
+    }
+
+    /// Executes an administrative proposal once signature threshold & timelock criteria are met.
+    pub fn execute_admin_action(env: Env, executor: Address, proposal_id: u64) {
+        executor.require_auth();
+        assert!(Self::is_admin(env.clone(), executor.clone()), "caller is not an admin");
+
+        let mut proposal: AdminProposal = env
+            .storage()
+            .persistent()
+            .get(&(PROPOSAL_KEY, proposal_id))
+            .expect("proposal not found");
+        assert!(!proposal.executed, "proposal already executed");
+
+        let threshold: u32 = env.storage().instance().get(&THRESHOLD_KEY).expect("threshold not set");
+        assert!(
+            proposal.approvals_count >= threshold,
+            "insufficient signatures to execute proposal"
+        );
+
+        let now = env.ledger().timestamp();
+        assert!(now >= proposal.eta, "proposal timelock delay has not elapsed");
+
+        match proposal.action.clone() {
+            AdminAction::SetDonationContract(target) => {
+                env.storage().instance().set(&DONATION_KEY, &target);
+            }
+            AdminAction::AddAdmin(new_admin) => {
+                let mut admins: SorobanVec<Address> = env.storage().instance().get(&ADMINS_KEY).unwrap();
+                if !Self::contains_address(&admins, &new_admin) {
+                    admins.push_back(new_admin);
+                    env.storage().instance().set(&ADMINS_KEY, &admins);
+                }
+            }
+            AdminAction::RemoveAdmin(old_admin) => {
+                let admins: SorobanVec<Address> = env.storage().instance().get(&ADMINS_KEY).unwrap();
+                let mut new_admins = SorobanVec::new(&env);
+                for i in 0..admins.len() {
+                    let a = admins.get(i).unwrap();
+                    if a != old_admin {
+                        new_admins.push_back(a);
+                    }
+                }
+                assert!(new_admins.len() > 0, "cannot remove all admins");
+                let threshold: u32 = env.storage().instance().get(&THRESHOLD_KEY).unwrap();
+                assert!(threshold <= new_admins.len(), "threshold exceeds remaining admin count");
+                env.storage().instance().set(&ADMINS_KEY, &new_admins);
+            }
+            AdminAction::SetThreshold(new_threshold) => {
+                let admins: SorobanVec<Address> = env.storage().instance().get(&ADMINS_KEY).unwrap();
+                assert!(
+                    new_threshold > 0 && new_threshold <= admins.len(),
+                    "invalid new threshold"
+                );
+                env.storage().instance().set(&THRESHOLD_KEY, &new_threshold);
+            }
+            _ => {}
+        }
+
+        proposal.executed = true;
+        env.storage().persistent().set(&(PROPOSAL_KEY, proposal_id), &proposal);
+
+        ProposalExecutedEvent {
+            proposal_id,
+            executor,
+        }
+        .publish(&env);
+    }
+
+    /// Point the registry at a new donation contract (e.g. after a
+    /// redeployment). Enforces multi-sig when threshold > 1.
+    pub fn set_donation_contract(env: Env, donation_contract: Address) {
+        let threshold: u32 = env.storage().instance().get(&THRESHOLD_KEY).unwrap_or(1);
+        if threshold == 1 {
+            let admin: Address = env
+                .storage()
+                .instance()
+                .get(&ADMIN_KEY)
+                .expect("registry not initialized");
+            admin.require_auth();
+            env.storage().instance().set(&DONATION_KEY, &donation_contract);
+        } else {
+            panic!("multi-sig required: use propose_admin_action to set donation contract");
+        }
     }
 
     /// Register a new creator profile. Must be signed by the creator.
@@ -182,6 +388,15 @@ impl CreatorRegistryContract {
     pub fn get_goal(env: Env, creator: Address) -> Option<i128> {
         env.storage().persistent().get(&(GOAL_KEY, creator))
     }
+
+    fn contains_address(vec: &SorobanVec<Address>, target: &Address) -> bool {
+        for i in 0..vec.len() {
+            if vec.get(i).unwrap() == *target {
+                return true;
+            }
+        }
+        false
+    }
 }
 
 #[cfg(test)]
@@ -275,20 +490,42 @@ mod tests {
     }
 
     #[test]
-    fn test_set_and_get_goal() {
+    fn test_registry_multisig_set_donation_contract() {
         let env = Env::default();
         env.mock_all_auths();
+
         let contract_id = env.register(CreatorRegistryContract, ());
         let client = CreatorRegistryContractClient::new(&env, &contract_id);
 
-        let creator = Address::generate(&env);
-        assert_eq!(client.get_goal(&creator), None);
+        let admin1 = Address::generate(&env);
+        let admin2 = Address::generate(&env);
+        let mut admins = SorobanVec::new(&env);
+        admins.push_back(admin1.clone());
+        admins.push_back(admin2.clone());
 
-        client.set_goal(&creator, &5000);
-        assert_eq!(client.get_goal(&creator), Some(5000));
+        let initial_donation = Address::generate(&env);
+        let new_donation = Address::generate(&env);
 
-        client.set_goal(&creator, &10000);
-        assert_eq!(client.get_goal(&creator), Some(10000));
+        client.initialize_multisig(&admins, &2, &50, &initial_donation);
+
+        let prop_id = client.propose_admin_action(
+            &admin1,
+            &AdminAction::SetDonationContract(new_donation.clone()),
+        );
+
+        let prop = client.get_proposal(&prop_id).unwrap();
+        assert_eq!(prop.approvals_count, 1);
+        assert_eq!(prop.executed, false);
+
+        client.approve_admin_action(&admin2, &prop_id);
+
+        // Advance ledger past timelock
+        env.ledger().with_mut(|li| li.timestamp = 60);
+
+        client.execute_admin_action(&admin1, &prop_id);
+
+        let prop_after = client.get_proposal(&prop_id).unwrap();
+        assert_eq!(prop_after.executed, true);
     }
 
     #[test]

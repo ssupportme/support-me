@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
+import Link from 'next/link';
 import { useAuth } from '@/context/AuthContext';
 
 function sliceAddress(addr: string) {
@@ -51,8 +52,26 @@ export function WalletMenu() {
       {open && (
         <div
           role="menu"
-          className="absolute right-0 mt-2 w-44 card-brutal bg-card p-2 z-50"
+          className="absolute right-0 mt-2 w-48 card-brutal bg-card p-2 z-50 flex flex-col gap-1"
         >
+          {/* Mobile-only menu items for secondary destinations */}
+          <div className="sm:hidden border-b border-ink/20 pb-1 mb-1 flex flex-col gap-1">
+            <Link
+              href="/app/subscriptions"
+              onClick={() => setOpen(false)}
+              className="w-full text-left px-3 py-2 rounded-lg font-bold text-ink hover:bg-accent-bg transition-colors"
+            >
+              Subscriptions
+            </Link>
+            <Link
+              href="/settings"
+              onClick={() => setOpen(false)}
+              className="w-full text-left px-3 py-2 rounded-lg font-bold text-ink hover:bg-accent-bg transition-colors"
+            >
+              Settings
+            </Link>
+          </div>
+
           <button
             role="menuitem"
             onClick={() => {
