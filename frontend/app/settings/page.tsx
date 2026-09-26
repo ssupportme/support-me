@@ -30,6 +30,10 @@ interface Creator {
   acceptsUsdc: boolean;
   acceptsUsdt: boolean;
   donationGoal: number | null;
+  // Creator-configured quick-select donate amounts (#120). Absent/empty
+  // means the creator hasn't customized these — the donate page falls back
+  // to its own hardcoded defaults.
+  presetAmounts?: number[] | null;
 }
 
 interface Goal {
@@ -63,6 +67,9 @@ export default function SettingsPage() {
   const [acceptsUsdc, setAcceptsUsdc] = useState(true);
   const [acceptsUsdt, setAcceptsUsdt] = useState(false);
   const [donationGoal, setDonationGoal] = useState('');
+  // Raw comma-separated text as the creator types it (#120); parsed into
+  // numbers only on save, same deferred-validation approach as donationGoal.
+  const [presetAmountsInput, setPresetAmountsInput] = useState('');
   // Raw per-platform input as the creator sees it (bare handle or full URL). We
   // normalize to full URLs only on save.
   const [socials, setSocials] = useState<Record<string, string>>({});
@@ -100,6 +107,9 @@ export default function SettingsPage() {
         setAcceptsUsdc(mine.acceptsUsdc ?? true);
         setAcceptsUsdt(mine.acceptsUsdt ?? false);
         setDonationGoal(mine.donationGoal != null ? String(mine.donationGoal) : '');
+        setPresetAmountsInput(
+          mine.presetAmounts && mine.presetAmounts.length > 0 ? mine.presetAmounts.join(', ') : ''
+        );
         setSocials(mine.socialLinks || {});
         await fetchGoals(mine.username);
       } catch (err) {
@@ -252,6 +262,26 @@ export default function SettingsPage() {
       goal = parsed;
     }
 
+    // Parse the preset amounts field into a validated array (#120); a blank
+    // field clears any customization, falling back to the donate page's own
+    // hardcoded defaults.
+    let presetAmounts: number[] = [];
+    if (presetAmountsInput.trim()) {
+      const parts = presetAmountsInput
+        .split(',')
+        .map((part) => part.trim())
+        .filter(Boolean);
+      if (parts.length > 6) {
+        notify.error('Enter at most 6 preset amounts.');
+        return;
+      }
+      presetAmounts = parts.map(Number);
+      if (presetAmounts.some((n) => !Number.isFinite(n) || n <= 0)) {
+        notify.error('Preset amounts must be positive numbers.');
+        return;
+      }
+    }
+
     // Fold raw social inputs into full URLs, dropping any left blank.
     const socialLinks: Record<string, string> = {};
     for (const platform of SOCIAL_PLATFORMS) {
@@ -277,6 +307,7 @@ export default function SettingsPage() {
           acceptsUsdc,
           acceptsUsdt,
           donationGoal: goal,
+          presetAmounts,
           socialLinks,
         }),
       });
@@ -464,6 +495,32 @@ export default function SettingsPage() {
                   className="input-brutal min-h-[44px]"
                 />
               </label>
+            </section>
+
+            {/* Preset donation amounts (#120) */}
+            <section className="space-y-4 border-t-2 border-ink pt-6">
+              <h2 className="text-lg font-extrabold text-ink">Preset donation amounts</h2>
+              <p className="text-sm text-muted font-medium">
+                Quick-select amounts shown as buttons on your donate page, in
+                whichever asset a supporter picks. Leave blank to use the
+                defaults (1, 5, 10, 20).
+              </p>
+              <div>
+                <label htmlFor="presetAmounts" className="block text-sm font-bold text-ink mb-2">
+                  Amounts (comma-separated, up to 6)
+                </label>
+                <input
+                  id="presetAmounts"
+                  type="text"
+                  value={presetAmountsInput}
+                  onChange={(e) => {
+                    setPresetAmountsInput(e.target.value);
+                    setDirty(true);
+                  }}
+                  placeholder="1, 5, 10, 25"
+                  className="input-brutal"
+                />
+              </div>
             </section>
 
             {/* Goals */}
