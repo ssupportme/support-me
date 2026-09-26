@@ -209,7 +209,7 @@ export default function ActivityPage() {
                       type="button"
                       onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
                       disabled={currentPage === 1}
-                      className="btn-brutal px-3 py-1.5 text-sm font-bold disabled:opacity-40 disabled:cursor-not-allowed"
+                      className="btn-brutal px-3 py-1.5 text-sm font-bold min-h-[44px] flex items-center justify-center disabled:opacity-40 disabled:cursor-not-allowed"
                     >
                       Previous
                     </button>
@@ -217,7 +217,7 @@ export default function ActivityPage() {
                       type="button"
                       onClick={() => setCurrentPage((p) => Math.min(data.pagination.totalPages, p + 1))}
                       disabled={currentPage === data.pagination.totalPages}
-                      className="btn-brutal px-3 py-1.5 text-sm font-bold disabled:opacity-40 disabled:cursor-not-allowed"
+                      className="btn-brutal px-3 py-1.5 text-sm font-bold min-h-[44px] flex items-center justify-center disabled:opacity-40 disabled:cursor-not-allowed"
                     >
                       Next
                     </button>
