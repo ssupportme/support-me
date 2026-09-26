@@ -20,10 +20,11 @@ import * as Sentry from "@sentry/node";
 
 const NETWORK_PASSPHRASE = Networks.TESTNET;
 
-const getDonationContractId = (): string | undefined =>
-  process.env.NEXT_PUBLIC_DONATION_CONTRACT_ID?.trim() || undefined;
-const getExecutorSecretKey = (): string | undefined =>
-  process.env.EXECUTOR_SECRET_KEY?.trim() || undefined;
+import { config } from "../config";
+import { toAmount } from "../lib/money";
+
+const getDonationContractId = (): string | undefined => config.donationContractId || undefined;
+const getExecutorSecretKey = (): string | undefined => config.executorSecretKey || undefined;
 const getPollIntervalMs = (): number => {
   const configured = Number(process.env.SUBSCRIPTION_EXECUTOR_POLL_INTERVAL_MS);
   return Number.isFinite(configured) && configured > 0 ? configured : 60_000;
@@ -52,17 +53,14 @@ export class SubscriptionExecutor {
 
   start(): void {
     const donationContractId = getDonationContractId();
-    if (!donationContractId) {
-      log("warn", "SubscriptionExecutor disabled: NEXT_PUBLIC_DONATION_CONTRACT_ID not set");
-      executorHealth.markDisabled();
-      return;
-    }
     const executorSecretKey = getExecutorSecretKey();
-    if (!executorSecretKey) {
-      log("warn", "SubscriptionExecutor disabled: EXECUTOR_SECRET_KEY not set");
-      executorHealth.markDisabled();
-      return;
+    
+    if (!donationContractId || !executorSecretKey) {
+      const msg = "SubscriptionExecutor cannot start: missing NEXT_PUBLIC_DONATION_CONTRACT_ID or EXECUTOR_SECRET_KEY.";
+      log("error", msg);
+      throw new Error(msg);
     }
+    
     if (this.timer) return;
 
     this.keypair = Keypair.fromSecret(executorSecretKey);
@@ -102,9 +100,11 @@ export class SubscriptionExecutor {
 
       log("info", "SubscriptionExecutor tick started", { dueCount: due.length });
 
-      for (const subscription of due) {
-        // One subscription's unexpected error (e.g. a DB write failing after
-        // the on-chain charge settled) must not skip the rest of this pass.
+      // Use a bounded concurrency (e.g., 5) to process charges concurrently
+      // without overloading the RPC or database.
+      const CONCURRENCY_LIMIT = 5;
+      
+      const processSubscription = async (subscription: Subscription) => {
         try {
           await this.charge(subscription);
         } catch (error) {
@@ -118,7 +118,17 @@ export class SubscriptionExecutor {
             error: errorMessage,
           });
         }
+      };
+
+      const chunks = [];
+      for (let i = 0; i < due.length; i += CONCURRENCY_LIMIT) {
+        chunks.push(due.slice(i, i + CONCURRENCY_LIMIT));
       }
+
+      for (const chunk of chunks) {
+        await Promise.all(chunk.map(processSubscription));
+      }
+
       ok = true;
     } catch (error) {
       runError = (error as Error).message;
@@ -170,12 +180,13 @@ export class SubscriptionExecutor {
           lastChargeTxHash: hash,
           lastChargedAt: new Date(),
           lastError: null,
+          failureCount: 0,
           failureNotifiedAt: null,
         },
       });
       // A recurring donation applies to goal progress the same way a
       // one-off donation does (see goalService.ts's applyDonationToGoals).
-      await applyDonationToGoals(client, subscription.creatorId, subscription.token, subscription.amount);
+      await applyDonationToGoals(client, subscription.creatorId, subscription.token, toAmount(subscription.amount));
     });
     executorHealth.recordCharge(subscription.id, "success");
 
@@ -202,6 +213,12 @@ export class SubscriptionExecutor {
   }
 
   private async recordFailure(subscription: Subscription, message: string): Promise<void> {
+    const isPermanent = message.includes("failed on-chain") || message.includes("reverted");
+    const currentFailureCount = (subscription as any).failureCount || 0;
+    const failureCount = currentFailureCount + 1;
+    const maxAttempts = isPermanent ? 3 : 24; // bounded attempts
+    const shouldDeactivate = failureCount >= maxAttempts;
+
     log("error", "SubscriptionExecutor charge failed", {
       subscriptionId: subscription.id,
       creatorId: subscription.creatorId,
@@ -209,6 +226,9 @@ export class SubscriptionExecutor {
       amount: subscription.amount,
       token: subscription.token,
       error: message,
+      isPermanent,
+      failureCount,
+      shouldDeactivate,
     });
 
     // Report to Sentry with full context for debugging
@@ -242,13 +262,16 @@ export class SubscriptionExecutor {
       }
     }
 
-    // Record the failure but leave `active`/`nextChargeAt` untouched — a
-    // transient RPC error should retry next tick, and a permanent one
-    // (e.g. revoked allowance) surfaces via `lastError` for the supporter
-    // to see rather than the executor looping forever.
+    // Record the failure and increment failureCount. If the streak exceeds
+    // maxAttempts, mark active = false so we stop retrying forever.
     await prisma.subscription.update({
       where: { id: subscription.id },
-      data: { lastError: message, ...(notified ? { failureNotifiedAt: new Date() } : {}) },
+      data: { 
+        lastError: message, 
+        failureCount,
+        ...(shouldDeactivate ? { active: false } : {}),
+        ...(notified ? { failureNotifiedAt: new Date() } : {}) 
+      },
     });
   }
 
@@ -310,7 +333,19 @@ export class SubscriptionExecutor {
   }
 
   private async confirm(hash: string): Promise<string> {
-    for (let i = 0; i < 30; i++) {
+    // Soroban RPC calls already retry transient failures internally (see
+    // services/retry.ts), so this loop only handles the normal case of a
+    // transaction that is submitted but not yet included in a ledger. The
+    // poll interval grows between attempts so a slow inclusion doesn't turn
+    // into a tight loop against the provider, while the overall confirmation
+    // window stays bounded at ~30s.
+    const POLL_INTERVAL_MS = 1_000;
+    const MAX_POLL_INTERVAL_MS = 8_000;
+    const MAX_WAIT_MS = 30_000;
+    const startedAt = Date.now();
+    let intervalMs = POLL_INTERVAL_MS;
+
+    for (;;) {
       const result = await withSorobanRpcServer("getTransaction", (server) =>
         server.getTransaction(hash)
       );
@@ -318,8 +353,13 @@ export class SubscriptionExecutor {
       if (result.status === "FAILED") {
         throw new Error(`Transaction ${hash} failed on-chain`);
       }
-      await new Promise((resolve) => setTimeout(resolve, 1000));
+
+      const elapsed = Date.now() - startedAt;
+      if (elapsed + intervalMs >= MAX_WAIT_MS) break;
+      await new Promise((resolve) => setTimeout(resolve, intervalMs));
+      intervalMs = Math.min(intervalMs * 2, MAX_POLL_INTERVAL_MS);
     }
+
     throw new Error(`Transaction ${hash} did not confirm within 30s`);
   }
 }

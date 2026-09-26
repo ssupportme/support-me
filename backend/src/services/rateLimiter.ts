@@ -35,6 +35,17 @@ export class RateLimiter {
     return true;
   }
 
+  /**
+   * Whole seconds (>= 1) until the oldest request in the current window
+   * expires and `key` may try again. 0 when `key` is not currently limited.
+   */
+  retryAfterSeconds(key: string): number {
+    const now = Date.now();
+    const inWindow = (this.hits.get(key) ?? []).filter((t) => t > now - this.windowMs);
+    if (inWindow.length < this.maxRequests) return 0;
+    return Math.max(1, Math.ceil((inWindow[0] + this.windowMs - now) / 1000));
+  }
+
   clear(): void {
     this.hits.clear();
   }

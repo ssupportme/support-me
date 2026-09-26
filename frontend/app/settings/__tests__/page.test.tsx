@@ -199,4 +199,77 @@ describe('SettingsPage', () => {
 
     expect(notify.error).toHaveBeenCalledWith('Enable at least one payment method (XLM, USDC, or USDT).');
   });
+
+  // Issue #120: creators can optionally customize donate-page preset amounts.
+  it("loads an existing creator's preset amounts into the field", async () => {
+    mockFetchRoutes({
+      '/api/creators/me': { body: { ...baseCreator, presetAmounts: [2, 5, 20] } },
+      '/api/goals/bob': { body: { items: [] } },
+    });
+
+    render(<SettingsPage />);
+
+    await waitFor(() =>
+      expect(screen.getByLabelText(/Amounts \(comma-separated/i)).toHaveValue('2, 5, 20')
+    );
+  });
+
+  it('saves custom preset amounts parsed from the comma-separated input', async () => {
+    mockFetchRoutes({
+      '/api/creators/me': { body: baseCreator },
+      '/api/creators/bob': { body: { ...baseCreator, presetAmounts: [1, 5, 10, 25] } },
+      '/api/goals/bob': { body: { items: [] } },
+    });
+    const user = userEvent.setup();
+
+    render(<SettingsPage />);
+    await waitFor(() => expect(screen.getByLabelText(/Amounts \(comma-separated/i)).toBeInTheDocument());
+
+    await user.type(screen.getByLabelText(/Amounts \(comma-separated/i), '1, 5, 10, 25');
+    await user.click(screen.getByRole('button', { name: 'Save changes' }));
+
+    await waitFor(() => {
+      const calls = (global.fetch as ReturnType<typeof vi.fn>).mock.calls;
+      const putCall = calls.find((call) => {
+        const [url, init] = call as [string, RequestInit];
+        return url.includes('/api/creators/bob') && init?.method === 'PUT';
+      }) as [string, RequestInit] | undefined;
+      expect(putCall).toBeTruthy();
+      expect(JSON.parse(putCall![1].body as string).presetAmounts).toEqual([1, 5, 10, 25]);
+    });
+  });
+
+  it('rejects a non-numeric preset amount before saving', async () => {
+    mockFetchRoutes({
+      '/api/creators/me': { body: baseCreator },
+      '/api/goals/bob': { body: { items: [] } },
+    });
+    const { notify } = await import('@/lib/notify');
+    const user = userEvent.setup();
+
+    render(<SettingsPage />);
+    await waitFor(() => expect(screen.getByLabelText(/Amounts \(comma-separated/i)).toBeInTheDocument());
+
+    await user.type(screen.getByLabelText(/Amounts \(comma-separated/i), '1, abc, 10');
+    await user.click(screen.getByRole('button', { name: 'Save changes' }));
+
+    expect(notify.error).toHaveBeenCalledWith('Preset amounts must be positive numbers.');
+  });
+
+  it('rejects more than 6 preset amounts', async () => {
+    mockFetchRoutes({
+      '/api/creators/me': { body: baseCreator },
+      '/api/goals/bob': { body: { items: [] } },
+    });
+    const { notify } = await import('@/lib/notify');
+    const user = userEvent.setup();
+
+    render(<SettingsPage />);
+    await waitFor(() => expect(screen.getByLabelText(/Amounts \(comma-separated/i)).toBeInTheDocument());
+
+    await user.type(screen.getByLabelText(/Amounts \(comma-separated/i), '1,2,3,4,5,6,7');
+    await user.click(screen.getByRole('button', { name: 'Save changes' }));
+
+    expect(notify.error).toHaveBeenCalledWith('Enter at most 6 preset amounts.');
+  });
 });

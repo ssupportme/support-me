@@ -1,6 +1,7 @@
 'use client';
 
 import { Toaster } from 'sonner';
+import { useTheme } from '@/context/ThemeContext';
 
 // The app's single toast outlet, mounted once in the root layout. Fire toasts
 // through `notify` (lib/notify.ts) so success/error feedback looks and behaves
@@ -11,8 +12,10 @@ import { Toaster } from 'sonner';
 // keyboard focus to the toasts, and every toast has a labelled close button.
 // Hovering or focusing the region pauses auto-dismiss.
 export function AppToaster() {
+  const { resolvedTheme } = useTheme();
   return (
     <Toaster
+      theme={resolvedTheme}
       position="bottom-center"
       richColors
       closeButton

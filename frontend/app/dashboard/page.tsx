@@ -3,12 +3,15 @@
 import { useState, useEffect, useRef, useLayoutEffect } from 'react';
 import Link from 'next/link';
 import { notify } from '@/lib/notify';
+import { donationsCsvFilename, donationsToCsv, downloadCsv } from '@/lib/csv';
 import { HugeiconsIcon } from '@hugeicons/react';
 import { PartyIcon } from '@hugeicons/core-free-icons';
 import { useAuth } from '@/context/AuthContext';
+import { useCreator } from '@/context/CreatorContext';
 import { ProtectedRoute } from '@/components/ProtectedRoute';
 import { AppNav } from '@/components/AppNav';
-import { Skeleton } from '@/components/Skeleton';
+import { DashboardSkeleton } from '@/components/DashboardSkeleton';
+import { DonationHistorySkeleton } from '@/components/DonationHistorySkeleton';
 import { TipChart } from '@/components/TipChart';
 import { ShareCard } from '@/components/ShareCard';
 import { ShareModal } from '@/components/ShareModal';
@@ -19,17 +22,6 @@ import { API_URL } from '@/lib/api';
 const STELLAR_NETWORK = process.env.NEXT_PUBLIC_STELLAR_NETWORK || 'testnet';
 const explorerTxUrl = (hash: string) =>
   `https://stellar.expert/explorer/${STELLAR_NETWORK}/tx/${hash}`;
-
-interface Creator {
-  id: number;
-  userId: number;
-  username: string;
-  displayName: string;
-  walletAddress: string;
-  avatarUrl: string | null;
-  donationGoal: number | null;
-  acceptsXlm: boolean;
-}
 
 interface Donation {
   id: number | string;
@@ -62,7 +54,7 @@ type ActivityItem =
 
 export default function DashboardPage() {
   const { user, token } = useAuth();
-  const [creator, setCreator] = useState<Creator | null>(null);
+  const { creator, loading } = useCreator();
   const [donations, setDonations] = useState<Donation[]>([]);
   const [withdrawals, setWithdrawals] = useState<Withdrawal[]>([]);
   const [donationPage, setDonationPage] = useState(1);
@@ -72,7 +64,6 @@ export default function DashboardPage() {
   const [loadingMoreDonations, setLoadingMoreDonations] = useState(false);
   const [loadMoreError, setLoadMoreError] = useState<string | null>(null);
   const [infiniteScroll, setInfiniteScroll] = useState(true);
-  const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [showShareCard, setShowShareCard] = useState(false);
   const [showShareModal, setShowShareModal] = useState(false);
@@ -92,32 +83,15 @@ export default function DashboardPage() {
   }, [donations]);
 
   useEffect(() => {
-    const fetchCreator = async () => {
-      if (!user || !token) return;
+    if (!user || !token || !creator) return;
 
+    const fetchData = async () => {
       try {
-        const resCreator = await fetch(`${API_URL}/api/creators/me`, {
-          headers: { 'Authorization': `Bearer ${token}` },
-        });
-
-        if (resCreator.status === 404) {
-          // User hasn't created profile yet
-          setCreator(null);
-          setLoading(false);
-          return;
-        }
-        if (!resCreator.ok) {
-          throw new Error('Failed to fetch your creator profile');
-        }
-
-        const userCreator: Creator = await resCreator.json();
-        setCreator(userCreator);
-
         const [resDonations, resWithdrawals] = await Promise.all([
-          fetch(`${API_URL}/api/donations?creatorUsername=${encodeURIComponent(userCreator.username)}&page=1&limit=20`, {
+          fetch(`${API_URL}/api/donations?creatorUsername=${encodeURIComponent(creator.username)}&page=1&limit=20`, {
             headers: { 'Authorization': `Bearer ${token}` },
           }),
-          fetch(`${API_URL}/api/withdrawals?creatorUsername=${userCreator.username}`, {
+          fetch(`${API_URL}/api/withdrawals?creatorUsername=${creator.username}`, {
             headers: { 'Authorization': `Bearer ${token}` },
           }),
         ]);
@@ -144,13 +118,41 @@ export default function DashboardPage() {
         }
       } catch (err) {
         setError((err as Error).message);
-      } finally {
-        setLoading(false);
       }
     };
 
-    fetchCreator();
-  }, [user, token]);
+    fetchData();
+  }, [user, token, creator]);
+
+  const [exporting, setExporting] = useState(false);
+
+  // Exports the creator's full donation history (not just the pages loaded on
+  // screen) by walking every page of the API, then downloads it as a CSV.
+  const exportDonationsCsv = async () => {
+    if (!creator || !token || exporting) return;
+    setExporting(true);
+    try {
+      const all: Donation[] = [];
+      const pageSize = 100;
+      const maxPages = 200;
+      for (let page = 1; page <= maxPages; page++) {
+        const response = await fetch(
+          `${API_URL}/api/donations?creatorUsername=${encodeURIComponent(creator.username)}&page=${page}&limit=${pageSize}`,
+          { headers: { Authorization: `Bearer ${token}` } }
+        );
+        if (!response.ok) throw new Error('The server returned an error. Please try again.');
+        const data = await response.json();
+        all.push(...((Array.isArray(data) ? data : data.items) || []));
+        if (Array.isArray(data) || !data.pagination || page >= data.pagination.totalPages) break;
+      }
+      downloadCsv(donationsCsvFilename(creator.username), donationsToCsv(all));
+      notify.success(`Exported ${all.length} donation${all.length === 1 ? '' : 's'}`);
+    } catch (err) {
+      notify.error('Could not export donations', err);
+    } finally {
+      setExporting(false);
+    }
+  };
 
   const loadMoreDonations = async () => {
     if (!creator || !token || loadingMoreDonations || !hasMoreDonations) return;
@@ -284,35 +286,7 @@ export default function DashboardPage() {
   if (loading) {
     return (
       <ProtectedRoute>
-        <div className="min-h-screen bg-background">
-          <AppNav />
-          <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-10">
-            <Skeleton className="h-9 w-40 mb-8" />
-
-            <div className="grid md:grid-cols-2 gap-6 mb-8">
-              {[0, 1].map((i) => (
-                <div key={i} className="card-brutal p-6">
-                  <Skeleton className="h-4 w-28 mb-3" />
-                  <Skeleton className="h-8 w-24" />
-                </div>
-              ))}
-            </div>
-
-            <div className="card-brutal p-6 mb-8">
-              <Skeleton className="h-5 w-32 mb-4" />
-              <Skeleton className="h-48 w-full" />
-            </div>
-
-            <div className="card-brutal p-6">
-              <Skeleton className="h-5 w-40 mb-4" />
-              <div className="space-y-3">
-                {[0, 1, 2, 3].map((i) => (
-                  <Skeleton key={i} className="h-10 w-full" />
-                ))}
-              </div>
-            </div>
-          </div>
-        </div>
+        <DashboardSkeleton />
       </ProtectedRoute>
     );
   }
@@ -441,27 +415,17 @@ export default function DashboardPage() {
           )}
 
           {/* Recent Activity — tips received and cash-outs, newest first */}
-          <div className="card-brutal p-6">
-            <div className="flex flex-wrap items-center justify-between gap-2 mb-4">
-              <div className="flex items-center gap-2">
-                <h2 className="text-lg font-extrabold text-ink">Recent Activity</h2>
-                {totalDonations !== null && totalDonations > 0 && (
-                  <span className="text-xs font-bold px-2 py-0.5 rounded-full bg-brand-light-purple/40 border border-ink/20 text-ink">
-                    {donations.length} of {totalDonations} tips
-                  </span>
-                )}
-              </div>
-              {hasMoreDonations && (
-                <label className="flex items-center gap-2 text-xs font-bold text-ink cursor-pointer select-none">
-                  <input
-                    type="checkbox"
-                    checked={infiniteScroll}
-                    onChange={(e) => setInfiniteScroll(e.target.checked)}
-                    className="rounded border-ink/40 text-brand-purple focus:ring-brand-purple"
-                  />
-                  <span>Infinite scroll</span>
-                </label>
-              )}
+          <div className="card-brutal p-4 sm:p-6 overflow-x-auto">
+            <div className="flex items-center justify-between gap-3 mb-4">
+              <h2 className="text-lg font-extrabold text-ink">Recent Activity</h2>
+              <button
+                type="button"
+                onClick={exportDonationsCsv}
+                disabled={exporting || donations.length === 0}
+                className="btn-brutal btn-brutal-white px-3 py-1.5 text-xs"
+              >
+                {exporting ? 'Exporting…' : 'Export CSV'}
+              </button>
             </div>
             {activity.length === 0 ? (
               <p className="text-muted font-medium text-center py-6">
@@ -575,12 +539,15 @@ export default function DashboardPage() {
             )}
 
             {loadingMoreDonations && (
-              <div
-                data-testid="donations-loading-indicator"
-                className="mt-4 p-3 bg-brand-light-purple/20 border-2 border-dashed border-ink/20 rounded-lg flex items-center justify-center gap-2 text-sm font-bold text-ink"
-              >
-                <div className="w-4 h-4 border-2 border-brand-purple border-t-transparent rounded-full animate-spin" />
-                <span>Loading older donations…</span>
+              <div className="mt-4 space-y-3">
+                <DonationHistorySkeleton rows={2} />
+                <div
+                  data-testid="donations-loading-indicator"
+                  className="p-3 bg-brand-light-purple/20 border-2 border-dashed border-ink/20 rounded-lg flex items-center justify-center gap-2 text-sm font-bold text-ink"
+                >
+                  <div className="w-4 h-4 border-2 border-brand-purple border-t-transparent rounded-full animate-spin" />
+                  <span>Loading older donations…</span>
+                </div>
               </div>
             )}
 

@@ -1,11 +1,13 @@
 import type { Metadata } from 'next';
 
 export const metadata: Metadata = {
-  title: 'Community Activity',
-  description:
-    'See new signups, top creators, and total earnings across the SupportMe community.',
+  title: 'Activity | SupportMe',
+  robots: {
+    index: false,
+    follow: false,
+  },
 };
 
 export default function ActivityLayout({ children }: { children: React.ReactNode }) {
-  return children;
+  return <>{children}</>;
 }

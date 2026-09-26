@@ -6,7 +6,7 @@
 
 use soroban_sdk::{contracttype, Address, String};
 
-#[derive(Clone)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 #[contracttype]
 pub struct DonationRecord {
     pub donor: Address,
@@ -45,4 +45,30 @@ pub struct Subscription {
     pub interval_secs: u64,
     pub next_charge_at: u64,
     pub active: bool,
+}
+
+/// Administrative actions that require multi-signature approval and timelock.
+#[derive(Clone, Debug, Eq, PartialEq)]
+#[contracttype]
+pub enum AdminAction {
+    SetExecutor(Address),
+    SetDonationContract(Address),
+    AddAdmin(Address),
+    RemoveAdmin(Address),
+    SetThreshold(u32),
+    Pause,
+    Unpause,
+}
+
+/// Proposal for sensitive multi-signature administrative changes.
+#[derive(Clone, Debug, Eq, PartialEq)]
+#[contracttype]
+pub struct AdminProposal {
+    pub id: u64,
+    pub action: AdminAction,
+    pub proposer: Address,
+    pub approvals_count: u32,
+    pub created_at: u64,
+    pub eta: u64,
+    pub executed: bool,
 }

@@ -11,6 +11,10 @@ jest.mock("../../prisma", () => ({
     donation: {
       groupBy: jest.fn(),
     },
+    subscription: {
+      count: jest.fn(),
+      findMany: jest.fn(),
+    },
     adminAuditLog: {
       create: jest.fn(),
       findMany: jest.fn(),
@@ -28,6 +32,7 @@ const mockedPrisma = prisma as unknown as {
   user: { count: jest.Mock; findMany: jest.Mock };
   creator: { count: jest.Mock };
   donation: { groupBy: jest.Mock };
+  subscription: { count: jest.Mock; findMany: jest.Mock };
   adminAuditLog: { create: jest.Mock; findMany: jest.Mock; count: jest.Mock };
 };
 
@@ -43,6 +48,8 @@ describe("GET /api/admin/overview", () => {
     mockedPrisma.adminAuditLog.create.mockResolvedValue({ id: 1 });
     mockedPrisma.adminAuditLog.findMany.mockResolvedValue([]);
     mockedPrisma.adminAuditLog.count.mockResolvedValue(0);
+    mockedPrisma.subscription.count.mockResolvedValue(0);
+    mockedPrisma.subscription.findMany.mockResolvedValue([]);
   });
 
   afterAll(() => {
@@ -136,6 +143,15 @@ describe("GET /api/admin/overview", () => {
       displayName: null,
       earningsByCurrency: {},
     });
+    
+    expect(res.body.pagination).toEqual({ page: 1, limit: 20, total: 3, totalPages: 1 });
+    expect(mockedPrisma.user.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        skip: 0,
+        take: 20,
+      })
+    );
+
     expect(mockedPrisma.adminAuditLog.create).toHaveBeenCalledWith({
       data: expect.objectContaining({
         adminId: 1,
@@ -145,6 +161,28 @@ describe("GET /api/admin/overview", () => {
         targetId: "overview",
       }),
     });
+  });
+
+  it("returns a paginated user list with custom page and limit", async () => {
+    mockedPrisma.user.count.mockResolvedValue(50);
+    mockedPrisma.creator.count.mockResolvedValue(10);
+    // group bys return empty arrays for simplicity here
+    mockedPrisma.donation.groupBy.mockResolvedValue([]);
+    mockedPrisma.user.findMany.mockResolvedValue([]);
+
+    const token = generateToken(1, ADMIN_WALLET);
+    const res = await request(app)
+      .get("/api/admin/overview?page=2&limit=10")
+      .set("Authorization", `Bearer ${token}`);
+
+    expect(res.status).toBe(200);
+    expect(res.body.pagination).toEqual({ page: 2, limit: 10, total: 50, totalPages: 5 });
+    expect(mockedPrisma.user.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        skip: 10,
+        take: 10,
+      })
+    );
   });
 });
 

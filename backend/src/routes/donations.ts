@@ -4,11 +4,18 @@ import prisma from "../prisma";
 import { asyncHandler } from "../middleware/asyncHandler";
 import { validate } from "../middleware/validate";
 import { createDonationSchema, listDonationsQuerySchema } from "../schemas/donations";
-import { BadRequestError, NotFoundError } from "../errors/AppError";
 import { notifyDonationConfirmation, notifyDonationReceived } from "../services/donationNotifications";
 import { applyDonationToGoals } from "../services/goalService";
+import { BadRequestError, NotFoundError } from "../errors/AppError";
+import { RateLimiter } from "../services/rateLimiter";
+import { clientIp, rateLimit } from "../middleware/rateLimit";
 
 const router = Router();
+
+// Donation creation does at least one database query per request, so it is
+// limited per IP and per sender wallet before any of that work happens.
+export const donationIpLimiter = new RateLimiter(60, 60 * 1000);
+export const donationSenderLimiter = new RateLimiter(20, 60 * 1000);
 
 router.get(
   "/",
@@ -51,7 +58,9 @@ router.get(
 
 router.post(
   "/",
+  rateLimit(donationIpLimiter, clientIp, "donation"),
   validate({ body: createDonationSchema }),
+  rateLimit(donationSenderLimiter, (req) => req.body.senderAddress, "donation"),
   asyncHandler(async (req, res) => {
     const idempotencyKey = req.header("Idempotency-Key")?.trim();
     if (!idempotencyKey) throw new BadRequestError("Idempotency-Key header is required");
@@ -83,7 +92,17 @@ router.post(
     let isNewDonation = false;
 
     const record = async (client: Prisma.TransactionClient): Promise<Donation> => {
-      await client.donationIdempotencyKey.deleteMany({ where: { expiresAt: { lt: new Date() } } });
+      // Cap per-request cleanup to a small batch size to avoid unbounded write load/lock contention
+      const expiredKeys = await client.donationIdempotencyKey.findMany({
+        where: { expiresAt: { lt: new Date() } },
+        select: { key: true },
+        take: 10,
+      });
+      if (expiredKeys.length > 0) {
+        await client.donationIdempotencyKey.deleteMany({
+          where: { key: { in: expiredKeys.map((k) => k.key) } },
+        });
+      }
       const existing = await client.donationIdempotencyKey.findUnique({
         where: { key: idempotencyKey },
         include: { donation: true },

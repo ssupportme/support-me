@@ -1,6 +1,7 @@
 import { Request, Response, NextFunction } from 'express';
 import * as jwt from 'jsonwebtoken';
 import { UnauthorizedError } from '../errors/AppError';
+import { getJwtSecret } from '../config';
 
 export interface AuthRequest extends Request {
   user?: {
@@ -23,7 +24,7 @@ export const authMiddleware = (req: AuthRequest, res: Response, next: NextFuncti
   }
 
   try {
-    const decoded = jwt.verify(token, process.env.JWT_SECRET || 'your-secret-key') as {
+    const decoded = jwt.verify(token, getJwtSecret()) as {
       id: number;
       walletAddress: string | null;
     };
@@ -37,7 +38,7 @@ export const authMiddleware = (req: AuthRequest, res: Response, next: NextFuncti
 export const generateToken = (userId: number, walletAddress: string | null): string => {
   return jwt.sign(
     { id: userId, walletAddress },
-    process.env.JWT_SECRET || 'your-secret-key',
+    getJwtSecret(),
     { expiresIn: '7d' }
   );
 };

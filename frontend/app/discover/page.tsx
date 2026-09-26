@@ -26,6 +26,21 @@ interface CreatorsResponse {
   pagination: { page: number; limit: number; total: number; totalPages: number };
 }
 
+// The API is expected to return { items, pagination }, but an error payload,
+// an empty body, or a backend shape change could hand us anything. Validate
+// before touching `.length` or nested fields so a bad response degrades to
+// the empty/error state instead of crashing the whole page.
+function isCreatorsResponse(data: unknown): data is CreatorsResponse {
+  if (!data || typeof data !== 'object') return false;
+  const candidate = data as Partial<CreatorsResponse>;
+  return (
+    Array.isArray(candidate.items) &&
+    typeof candidate.pagination === 'object' &&
+    candidate.pagination !== null &&
+    typeof candidate.pagination.totalPages === 'number'
+  );
+}
+
 const SORTS: { value: Sort; label: string; icon: typeof Search01Icon }[] = [
   { value: 'newest', label: 'Newest', icon: Clock01Icon },
   { value: 'most-supported', label: 'Most Supported', icon: FireIcon },
@@ -42,6 +57,7 @@ export default function DiscoverPage() {
   const [loading, setLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
   const [error, setError] = useState('');
+  const [loadMoreError, setLoadMoreError] = useState('');
 
   // Debounce the search box so we don't fire a request per keystroke.
   useEffect(() => {
@@ -54,6 +70,7 @@ export default function DiscoverPage() {
     let cancelled = false;
     setLoading(true);
     setError('');
+    setLoadMoreError('');
 
     const params = new URLSearchParams({ sort, page: '1', limit: '20' });
     if (debouncedQuery) params.set('q', debouncedQuery);
@@ -61,10 +78,17 @@ export default function DiscoverPage() {
     fetch(`${API_URL}/api/creators?${params}`)
       .then((res) => {
         if (!res.ok) throw new Error('Failed to load creators');
-        return res.json() as Promise<CreatorsResponse>;
+        return res.json().catch(() => null) as Promise<unknown>;
       })
       .then((data) => {
         if (cancelled) return;
+        if (!isCreatorsResponse(data)) {
+          setCreators([]);
+          setPage(1);
+          setTotalPages(1);
+          setError('Something went wrong loading creators. Please try again.');
+          return;
+        }
         setCreators(data.items);
         setPage(1);
         setTotalPages(data.pagination.totalPages);
@@ -81,18 +105,24 @@ export default function DiscoverPage() {
     };
   }, [debouncedQuery, sort]);
 
+  // Failures leave `page` and `creators` untouched, so retrying re-requests the
+  // same page and already-loaded results stay on screen.
   const loadMore = async () => {
     if (loadingMore || page >= totalPages) return;
     setLoadingMore(true);
+    setLoadMoreError('');
     try {
       const nextPage = page + 1;
       const params = new URLSearchParams({ sort, page: String(nextPage), limit: '20' });
       if (debouncedQuery) params.set('q', debouncedQuery);
       const res = await fetch(`${API_URL}/api/creators?${params}`);
-      if (!res.ok) return;
-      const data: CreatorsResponse = await res.json();
+      if (!res.ok) throw new Error('Failed to load more creators');
+      const data: unknown = await res.json().catch(() => null);
+      if (!isCreatorsResponse(data)) throw new Error('Unexpected response');
       setCreators((prev) => [...prev, ...data.items]);
       setPage(nextPage);
+    } catch {
+      setLoadMoreError("Couldn't load more creators. Check your connection and try again.");
     } finally {
       setLoadingMore(false);
     }
@@ -237,13 +267,18 @@ export default function DiscoverPage() {
 
             {page < totalPages && (
               <div className="text-center mt-8">
+                {loadMoreError && (
+                  <p role="alert" className="mb-3 font-bold text-ink">
+                    {loadMoreError}
+                  </p>
+                )}
                 <button
                   type="button"
                   onClick={loadMore}
                   disabled={loadingMore}
                   className="btn-brutal btn-brutal-white"
                 >
-                  {loadingMore ? 'Loading…' : 'Load more'}
+                  {loadingMore ? 'Loading…' : loadMoreError ? 'Retry' : 'Load more'}
                 </button>
               </div>
             )}

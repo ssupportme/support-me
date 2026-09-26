@@ -6,6 +6,7 @@ import {
   subscriptionPaymentFailedEmail,
   subscriptionRenewedEmail,
 } from "./email/templates";
+import { toAmount } from "../lib/money";
 
 const manageUrl = (): string =>
   `${(process.env.APP_URL || "http://localhost:3000").replace(/\/$/, "")}/app/subscriptions`;
@@ -41,7 +42,7 @@ export async function notifySubscriptionRenewed(
     to: recipient.email,
     ...subscriptionRenewedEmail({
       creatorName: recipient.creatorName,
-      amount: subscription.amount,
+      amount: toAmount(subscription.amount),
       token: subscription.token,
       intervalSecs: subscription.intervalSecs,
       manageUrl: manageUrl(),
@@ -71,7 +72,7 @@ export async function notifySubscriptionPaymentFailed(
     to: recipient.email,
     ...subscriptionPaymentFailedEmail({
       creatorName: recipient.creatorName,
-      amount: subscription.amount,
+      amount: toAmount(subscription.amount),
       token: subscription.token,
       intervalSecs: subscription.intervalSecs,
       manageUrl: manageUrl(),

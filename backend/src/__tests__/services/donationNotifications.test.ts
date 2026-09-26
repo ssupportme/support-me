@@ -1,7 +1,7 @@
 jest.mock("../../prisma", () => ({
   __esModule: true,
   default: {
-    creator: { findUnique: jest.fn() },
+    creator: { findUnique: jest.fn(), findFirst: jest.fn() },
     user: { findUnique: jest.fn() },
   },
 }));
@@ -10,13 +10,13 @@ jest.mock("../../services/email/mailer", () => ({
   sendEmail: jest.fn().mockResolvedValue(undefined),
 }));
 
-import { Donation } from "@prisma/client";
+import { Donation, Prisma } from "@prisma/client";
 import prisma from "../../prisma";
 import { sendEmail } from "../../services/email/mailer";
 import { notifyDonationConfirmation, notifyDonationReceived } from "../../services/donationNotifications";
 
 const mockedPrisma = prisma as unknown as {
-  creator: { findUnique: jest.Mock };
+  creator: { findUnique: jest.Mock; findFirst: jest.Mock };
   user: { findUnique: jest.Mock };
 };
 const mockedSendEmail = sendEmail as jest.MockedFunction<typeof sendEmail>;
@@ -25,7 +25,7 @@ const DONATION: Donation = {
   id: 1,
   creatorId: 7,
   senderAddress: "GA7D5LDGFABXNYEO6LZVMTWK5JWEPTODCLYZ7TG4XDZRKKXP6OS5K5JW",
-  amount: 25,
+  amount: new Prisma.Decimal(25),
   currency: "XLM",
   message: "keep it up!",
   transactionHash: "abc123",
@@ -40,6 +40,9 @@ const DONATION: Donation = {
 beforeEach(() => {
   jest.clearAllMocks();
   mockedSendEmail.mockResolvedValue(undefined);
+  // Default: the supporter is not itself a known creator, so the receipt shows
+  // the truncated address only. Tests that care override this.
+  mockedPrisma.creator.findFirst.mockResolvedValue(null);
 });
 
 describe("notifyDonationReceived (#17)", () => {
@@ -64,6 +67,7 @@ describe("notifyDonationReceived (#17)", () => {
   it("never includes the full sender wallet address, only a truncated form", async () => {
     mockedPrisma.creator.findUnique.mockResolvedValue({
       id: 7,
+      username: "bob",
       user: { email: "bob@example.com" },
     });
 
@@ -92,11 +96,40 @@ describe("notifyDonationReceived (#17)", () => {
     expect(mockedSendEmail).not.toHaveBeenCalled();
   });
 
-  it("propagates a send failure to the caller rather than swallowing it silently", async () => {
-    mockedPrisma.creator.findUnique.mockResolvedValue({ id: 7, user: { email: "bob@example.com" } });
+  it("surfaces a send failure in the log rather than reporting success", async () => {
+    mockedPrisma.creator.findUnique.mockResolvedValue({
+      id: 7,
+      username: "bob",
+      user: { email: "bob@example.com" },
+    });
     mockedSendEmail.mockRejectedValue(new Error("provider down"));
+    const logged = jest.spyOn(console, "error").mockImplementation(() => undefined);
 
-    await expect(notifyDonationReceived(DONATION)).rejects.toThrow("provider down");
+    const sent = await notifyDonationReceived(DONATION);
+
+    // The caller treats a missing email as "not sent" (false), and the failure
+    // is logged rather than swallowed silently, so an outage is diagnosable
+    // without turning a committed donation into a 500 for the client.
+    expect(sent).toBe(false);
+    expect(logged).toHaveBeenCalledWith(
+      expect.stringContaining(`donation ${DONATION.id}`),
+      "provider down"
+    );
+  });
+
+  it("names the supporter in the receipt when they are themselves a known creator", async () => {
+    mockedPrisma.creator.findUnique.mockResolvedValue({
+      id: 7,
+      username: "bob",
+      displayName: "Bob",
+      user: { email: "bob@example.com" },
+    });
+    mockedPrisma.creator.findFirst.mockResolvedValue({ id: 9, username: "supporter", displayName: "Sam Supporter" });
+
+    await notifyDonationReceived(DONATION);
+
+    const message = mockedSendEmail.mock.calls[0][0];
+    expect(message.text).toContain("Sam Supporter");
   });
 });
 
