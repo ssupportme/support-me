@@ -480,15 +480,15 @@ npm test
 
 ## CI/CD
 
-[`.github/workflows/ci.yml`](.github/workflows/ci.yml) runs three
-independent jobs on every push and pull request to `main`:
+[`.github/workflows/ci.yml`](.github/workflows/ci.yml) runs independent jobs on every push and pull request to `main`, tied together by a single required `test-all` status check:
 
-- **Contracts**: `cargo test --workspace`, then a release build to
+- **Contracts**: `cargo test --workspace` for all three crates, then a release build to
   `wasm32v1-none` to confirm both contracts still compile to WASM.
 - **Backend**: `npm run build` (Prisma client generation + `tsc`), then
   `npm test`.
 - **Frontend**: `npx tsc --noEmit`, then `npm test`, then `npm run build`.
-
+- **Type Drift**: Verifies that changes to shared contract types (`contracts/common/src/lib.rs`) are accompanied by frontend TypeScript updates.
+- **All tests passed**: A single job depending on all the above to provide a unified 'all green' status for branch protection.
 None of the jobs require real secrets or a live database — backend tests
 mock Prisma, and the Prisma client can be generated from `schema.prisma`
 without a reachable `DATABASE_URL`.
