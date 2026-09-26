@@ -191,7 +191,7 @@ export function ShareModal({
                 readOnly
                 value={profileUrl}
                 onClick={(e) => (e.target as HTMLInputElement).select()}
-                className="input-brutal font-mono text-sm flex-1 bg-white text-ink"
+                className="input-brutal font-mono text-sm flex-1 text-ink"
                 aria-label="Profile link input"
               />
               <button

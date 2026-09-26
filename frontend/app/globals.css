@@ -1,13 +1,41 @@
 @import "tailwindcss";
 
+/* Class-based dark mode: `dark:` utilities apply under .dark on <html>. */
+@custom-variant dark (&:where(.dark, .dark *));
+
 /*
  * SupportMe — neobrutalism design system (v3)
  * Hard black borders, flat saturated fills, chunky offset shadows, no gradients.
+ *
+ * Every surface/text color is a runtime CSS variable so the `.dark` theme can
+ * re-skin the whole app by overriding the palette — components and Tailwind
+ * utilities reference the @theme tokens below, which alias these variables.
+ * Brand fills (yellow/lime/cyan/…) stay identical in both themes on purpose:
+ * saturated flat color is the point of the style, and it reads fine on dark.
  */
 
 :root {
   --background: #fdfcf7; /* warm paper */
   --foreground: #0a0a0a; /* near-black ink */
+
+  /* Ink drives every border and shadow in the system. */
+  --ink: #0a0a0a;
+  --card: #ffffff;
+  --muted: #57534e;
+  --accent-bg: #ede9fe;  /* soft violet wash for panels */
+  --input-bg: #ffffff;
+  --shadow-color: #0a0a0a;
+}
+
+.dark {
+  --background: #161412; /* warm charcoal */
+  --foreground: #f4f2ec;
+  --ink: #f4f2ec;
+  --card: #211e1b;
+  --muted: #a8a29e;
+  --accent-bg: #2b2440;  /* deep violet wash */
+  --input-bg: #161412;
+  --shadow-color: #000000;
 }
 
 @theme inline {
@@ -15,7 +43,7 @@
   --color-foreground: var(--foreground);
 
   /* Ink drives every border and shadow in the system. */
-  --color-ink: #0a0a0a;
+  --color-ink: var(--ink);
 
   /* Primary action color. */
   --color-primary: #7c3aed;      /* violet */
@@ -29,15 +57,16 @@
   --color-brand-orange: #ff7a5c;
   --color-brand-lilac: #c4b5fd;
 
-  --color-card: #ffffff;
-  --color-border: #0a0a0a;       /* hard black, not soft gray */
-  --color-muted: #57534e;
-  --color-accent-bg: #ede9fe;    /* soft violet wash for panels */
+  --color-card: var(--card);
+  --color-border: var(--ink);      /* hard ink, not soft gray */
+  --color-muted: var(--muted);
+  --color-accent-bg: var(--accent-bg);
+  --color-input: var(--input-bg);
 
   /* Chunky offset shadows — the signature neobrutalism drop. */
-  --shadow-brutal-sm: 2px 2px 0 0 #0a0a0a;
-  --shadow-brutal: 4px 4px 0 0 #0a0a0a;
-  --shadow-brutal-lg: 6px 6px 0 0 #0a0a0a;
+  --shadow-brutal-sm: 2px 2px 0 0 var(--shadow-color);
+  --shadow-brutal: 4px 4px 0 0 var(--shadow-color);
+  --shadow-brutal-lg: 6px 6px 0 0 var(--shadow-color);
 
   --font-sans: var(--font-geist-sans);
   --font-display: var(--font-display), var(--font-geist-sans);
@@ -106,14 +135,14 @@ input[type="number"] {
     @apply bg-primary text-white;
   }
   .btn-brutal-white {
-    @apply bg-white text-ink;
+    @apply bg-card text-ink;
   }
   .btn-brutal-lime {
     @apply bg-brand-lime text-ink;
   }
 
   .input-brutal {
-    @apply w-full px-4 py-3 bg-white text-black
+    @apply w-full px-4 py-3 bg-input text-foreground
            border-2 border-ink rounded-xl outline-none
            placeholder:text-muted transition-all;
   }

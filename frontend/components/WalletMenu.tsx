@@ -43,7 +43,7 @@ export function WalletMenu() {
         onClick={() => setOpen((v) => !v)}
         aria-haspopup="menu"
         aria-expanded={open}
-        className="btn-brutal btn-brutal-white text-sm sm:text-base font-mono gap-1.5"
+        className="btn-brutal btn-brutal-white text-sm sm:text-base font-mono gap-1.5 min-h-[44px] flex items-center justify-center"
       >
         {sliceAddress(user.walletAddress)}
         <span className={`text-xs transition-transform ${open ? 'rotate-180' : ''}`}>▾</span>
@@ -78,7 +78,7 @@ export function WalletMenu() {
               logout();
               window.location.href = '/';
             }}
-            className="w-full text-left px-3 py-2 rounded-lg font-bold text-ink hover:bg-brand-pink transition-colors"
+            className="w-full text-left px-3 py-2 rounded-lg font-bold text-ink hover:bg-brand-pink transition-colors min-h-[44px] flex items-center"
           >
             Sign Out
           </button>
