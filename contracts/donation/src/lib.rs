@@ -143,6 +143,11 @@ impl DonationContract {
     /// Transfer `amount` of `token` from `donor` to `creator`, record the
     /// donation locally, and notify the CreatorRegistry (cross-contract) so
     /// the creator's lifetime stats stay in sync.
+    /// 
+    /// NOTE ON TTL: The donation record is stored with the network's default TTL.
+    /// To minimize rent costs on an indefinitely growing append-only log, this 
+    /// contract does not call `extend_ttl` for old records. They are allowed to expire,
+    /// with the backend relying on emitted `DonatedEvent`s for history instead.
     pub fn donate(
         env: Env,
         donor: Address,
