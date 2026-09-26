@@ -13,6 +13,7 @@ import {
 } from "../schemas/creators";
 import { ConflictError, NotFoundError, UnauthorizedError } from "../errors/AppError";
 import { TtlCache } from "../services/ttlCache";
+import { toAmount } from "../lib/money";
 
 const router = Router();
 
@@ -150,7 +151,7 @@ router.get(
           .filter((g) => creatorById.has(g.creatorId))
           .map((g, index) => ({
             rank: index + 1,
-            total: g._sum.amount ?? 0,
+            total: toAmount(g._sum.amount),
             donationCount: g._count._all,
             creator: creatorById.get(g.creatorId)!,
           }));
@@ -168,7 +169,7 @@ router.get(
 
       const entries: SupporterLeaderboardEntry[] = grouped.map((g, index) => ({
         rank: index + 1,
-        total: g._sum.amount ?? 0,
+        total: toAmount(g._sum.amount),
         donationCount: g._count._all,
         senderAddress: g.senderAddress,
       }));

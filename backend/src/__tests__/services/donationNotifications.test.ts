@@ -10,7 +10,7 @@ jest.mock("../../services/email/mailer", () => ({
   sendEmail: jest.fn().mockResolvedValue(undefined),
 }));
 
-import { Donation } from "@prisma/client";
+import { Donation, Prisma } from "@prisma/client";
 import prisma from "../../prisma";
 import { sendEmail } from "../../services/email/mailer";
 import { notifyDonationConfirmation, notifyDonationReceived } from "../../services/donationNotifications";
@@ -25,7 +25,7 @@ const DONATION: Donation = {
   id: 1,
   creatorId: 7,
   senderAddress: "GA7D5LDGFABXNYEO6LZVMTWK5JWEPTODCLYZ7TG4XDZRKKXP6OS5K5JW",
-  amount: 25,
+  amount: new Prisma.Decimal(25),
   currency: "XLM",
   message: "keep it up!",
   transactionHash: "abc123",

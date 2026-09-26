@@ -3,6 +3,7 @@ import prisma from "../prisma";
 import { sendEmail } from "./email/mailer";
 import { donationConfirmationEmail } from "./email/templates";
 import { emailService } from "./email/emailService";
+import { toAmount } from "../lib/money";
 
 const dashboardUrl = (): string =>
   `${(process.env.APP_URL || "http://localhost:3000").replace(/\/$/, "")}/app/dashboard`;
@@ -33,7 +34,7 @@ export async function notifyDonationReceived(donation: Donation): Promise<boolea
       creatorName: creator.displayName || creator.username,
       donorName,
       donorAddress: donation.senderAddress,
-      amount: donation.amount,
+      amount: toAmount(donation.amount),
       currency: donation.currency,
       message: donation.message,
       timestamp: donation.createdAt,
@@ -67,7 +68,7 @@ export async function notifyDonationConfirmation(donation: Donation): Promise<bo
     to: supporter.email,
     ...donationConfirmationEmail({
       creatorName: creator?.displayName || creator?.username || "a creator",
-      amount: donation.amount,
+      amount: toAmount(donation.amount),
       currency: donation.currency,
       transactionHash: donation.transactionHash,
     }),

@@ -128,7 +128,7 @@ model Donation {
   creator         Creator                 @relation(fields: [creatorId], references: [id])
   creatorId       Int
   senderAddress   String
-  amount          Float
+  amount          Decimal                 @db.Decimal(20, 7)
   currency        String                  @default("XLM")
   message         String?
   transactionHash String?
@@ -159,9 +159,9 @@ model Withdrawal {
   id          Int      @id @default(autoincrement())
   creator     Creator  @relation(fields: [creatorId], references: [id])
   creatorId   Int
-  amountIn    Float // crypto withdrawn (SEP-24 amount_in)
-  amountOut   Float? // fiat received (amount_out), when the anchor reports it
-  fee         Float? // amount_fee
+  amountIn    Decimal  @db.Decimal(20, 7) // crypto withdrawn (SEP-24 amount_in)
+  amountOut   Decimal? @db.Decimal(20, 7) // fiat received (amount_out), when the anchor reports it
+  fee         Decimal? @db.Decimal(20, 7) // amount_fee
   currency    String   @default("USDC") // asset withdrawn
   anchorTxId  String // SEP-24 transaction id
   stellarTxId String? // on-chain payment to the anchor (stellar_transaction_id)
@@ -228,7 +228,7 @@ model Subscription {
   creatorId         Int
   supporterAddress  String
   token             String // asset code, e.g. "XLM" or "USDC"
-  amount            Float // amount charged per interval
+  amount            Decimal @db.Decimal(20, 7) // amount charged per interval
   intervalSecs      Int
   onChainId         Int       @unique // subscription_id returned by the donation contract's subscribe()
   subscribeTxHash   String?
