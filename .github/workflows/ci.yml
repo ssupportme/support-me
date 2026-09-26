@@ -120,3 +120,34 @@ jobs:
           name: playwright-report
           path: frontend/playwright-report/
           retention-days: 30
+
+  type-drift:
+    name: Check Type Drift
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Check if frontend types updated when contracts/common changed
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            BASE_REF=${{ github.event.pull_request.base.sha }}
+            COMMON_CHANGED=$(git diff --name-only $BASE_REF | grep -E "^contracts/common/src/lib\.rs" || true)
+            if [ -n "$COMMON_CHANGED" ]; then
+              TS_CHANGED=$(git diff --name-only $BASE_REF | grep -E "^frontend/.*\.tsx?$" || true)
+              if [ -z "$TS_CHANGED" ]; then
+                echo "Error: contracts/common/src/lib.rs changed, but no frontend TypeScript files were updated."
+                echo "Please ensure any changes to shared types are mirrored in the frontend."
+                exit 1
+              else
+                echo "contracts/common changed, and frontend TS files changed. Assuming types are synced."
+              fi
+            fi
+          fi
+
+  test-all:
+    name: All tests passed
+    runs-on: ubuntu-latest
+    needs: [contracts, backend, frontend, e2e, type-drift]
+    steps:
+      - run: echo "All test suites and checks passed."
