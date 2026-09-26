@@ -26,6 +26,21 @@ interface CreatorsResponse {
   pagination: { page: number; limit: number; total: number; totalPages: number };
 }
 
+// The API is expected to return { items, pagination }, but an error payload,
+// an empty body, or a backend shape change could hand us anything. Validate
+// before touching `.length` or nested fields so a bad response degrades to
+// the empty/error state instead of crashing the whole page.
+function isCreatorsResponse(data: unknown): data is CreatorsResponse {
+  if (!data || typeof data !== 'object') return false;
+  const candidate = data as Partial<CreatorsResponse>;
+  return (
+    Array.isArray(candidate.items) &&
+    typeof candidate.pagination === 'object' &&
+    candidate.pagination !== null &&
+    typeof candidate.pagination.totalPages === 'number'
+  );
+}
+
 const SORTS: { value: Sort; label: string; icon: typeof Search01Icon }[] = [
   { value: 'newest', label: 'Newest', icon: Clock01Icon },
   { value: 'most-supported', label: 'Most Supported', icon: FireIcon },
@@ -61,10 +76,17 @@ export default function DiscoverPage() {
     fetch(`${API_URL}/api/creators?${params}`)
       .then((res) => {
         if (!res.ok) throw new Error('Failed to load creators');
-        return res.json() as Promise<CreatorsResponse>;
+        return res.json().catch(() => null) as Promise<unknown>;
       })
       .then((data) => {
         if (cancelled) return;
+        if (!isCreatorsResponse(data)) {
+          setCreators([]);
+          setPage(1);
+          setTotalPages(1);
+          setError('Something went wrong loading creators. Please try again.');
+          return;
+        }
         setCreators(data.items);
         setPage(1);
         setTotalPages(data.pagination.totalPages);
@@ -90,7 +112,8 @@ export default function DiscoverPage() {
       if (debouncedQuery) params.set('q', debouncedQuery);
       const res = await fetch(`${API_URL}/api/creators?${params}`);
       if (!res.ok) return;
-      const data: CreatorsResponse = await res.json();
+      const data: unknown = await res.json().catch(() => null);
+      if (!isCreatorsResponse(data)) return;
       setCreators((prev) => [...prev, ...data.items]);
       setPage(nextPage);
     } finally {
