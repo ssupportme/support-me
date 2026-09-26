@@ -7,6 +7,7 @@ import { notify } from '@/lib/notify';
 import { HugeiconsIcon } from '@hugeicons/react';
 import { ImageUpload01Icon } from '@hugeicons/core-free-icons';
 import { useAuth } from '@/context/AuthContext';
+import { useCreator } from '@/context/CreatorContext';
 import { ProtectedRoute } from '@/components/ProtectedRoute';
 import { AppNav } from '@/components/AppNav';
 import { QrCodeCard } from '@/components/QrCodeCard';
@@ -16,25 +17,6 @@ import { uploadAvatar } from '@/lib/upload';
 import { API_URL } from '@/lib/api';
 import { fetchWithRetry, isNetworkError } from '@/lib/network';
 import { AccountDataSection } from '@/components/AccountDataSection';
-
-interface Creator {
-  id: number;
-  userId: number;
-  username: string;
-  displayName: string | null;
-  bio: string | null;
-  walletAddress: string;
-  avatarUrl: string | null;
-  socialLinks: Record<string, string> | null;
-  acceptsXlm: boolean;
-  acceptsUsdc: boolean;
-  acceptsUsdt: boolean;
-  donationGoal: number | null;
-  // Creator-configured quick-select donate amounts (#120). Absent/empty
-  // means the creator hasn't customized these — the donate page falls back
-  // to its own hardcoded defaults.
-  presetAmounts?: number[] | null;
-}
 
 interface Goal {
   id: number;
@@ -51,13 +33,9 @@ const GOAL_CURRENCIES = ['XLM', 'USDC', 'USDT'];
 
 export default function SettingsPage() {
   const { user, token } = useAuth();
-  const [creator, setCreator] = useState<Creator | null>(null);
-  const [loading, setLoading] = useState(true);
+  const { creator, loading: creatorLoading, invalidate } = useCreator();
   const [saving, setSaving] = useState(false);
   const [uploading, setUploading] = useState(false);
-  // Tracks edits made via the form's own onChange handlers only — never set
-  // by the initial fetchCreator population — so we can warn before an
-  // accidental tab close/refresh loses unsaved changes.
   const [dirty, setDirty] = useState(false);
 
   const [displayName, setDisplayName] = useState('');
@@ -67,17 +45,9 @@ export default function SettingsPage() {
   const [acceptsUsdc, setAcceptsUsdc] = useState(true);
   const [acceptsUsdt, setAcceptsUsdt] = useState(false);
   const [donationGoal, setDonationGoal] = useState('');
-  // Raw comma-separated text as the creator types it (#120); parsed into
-  // numbers only on save, same deferred-validation approach as donationGoal.
   const [presetAmountsInput, setPresetAmountsInput] = useState('');
-  // Raw per-platform input as the creator sees it (bare handle or full URL). We
-  // normalize to full URLs only on save.
   const [socials, setSocials] = useState<Record<string, string>>({});
 
-  // Goals (issue #20): a creator can track several simultaneous and/or
-  // recurring goals, managed independently of the Profile/Payments/Socials
-  // form above (each goal is created/ended via its own API call, not bundled
-  // into the profile PUT).
   const [goals, setGoals] = useState<Goal[]>([]);
   const [goalsLoading, setGoalsLoading] = useState(true);
   const [creatingGoal, setCreatingGoal] = useState(false);
@@ -89,38 +59,22 @@ export default function SettingsPage() {
 
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  // Populate form fields from the shared creator data
   useEffect(() => {
-    const fetchCreator = async () => {
-      if (!user || !token) return;
-      try {
-        const res = await fetchWithRetry(`${API_URL}/api/creators/me`, {
-          headers: { Authorization: `Bearer ${token}` },
-        });
-        if (res.status === 404) return;
-        if (!res.ok) throw new Error('Failed to load your profile');
-        const mine: Creator = await res.json();
-        setCreator(mine);
-        setDisplayName(mine.displayName || '');
-        setBio(mine.bio || '');
-        setAvatarUrl(mine.avatarUrl || '');
-        setAcceptsXlm(mine.acceptsXlm ?? true);
-        setAcceptsUsdc(mine.acceptsUsdc ?? true);
-        setAcceptsUsdt(mine.acceptsUsdt ?? false);
-        setDonationGoal(mine.donationGoal != null ? String(mine.donationGoal) : '');
-        setPresetAmountsInput(
-          mine.presetAmounts && mine.presetAmounts.length > 0 ? mine.presetAmounts.join(', ') : ''
-        );
-        setSocials(mine.socialLinks || {});
-        await fetchGoals(mine.username);
-      } catch (err) {
-        if (isNetworkError(err)) return;
-        notify.error('Could not load settings', err);
-      } finally {
-        setLoading(false);
-      }
-    };
-    fetchCreator();
-  }, [user, token]);
+    if (!creator) return;
+    setDisplayName(creator.displayName || '');
+    setBio((creator as any).bio || '');
+    setAvatarUrl(creator.avatarUrl || '');
+    setAcceptsXlm(creator.acceptsXlm ?? true);
+    setAcceptsUsdc(creator.acceptsUsdc ?? true);
+    setAcceptsUsdt(creator.acceptsUsdt ?? false);
+    setDonationGoal(creator.donationGoal != null ? String(creator.donationGoal) : '');
+    setPresetAmountsInput(
+      creator.presetAmounts && creator.presetAmounts.length > 0 ? creator.presetAmounts.join(', ') : ''
+    );
+    setSocials(creator.socialLinks || {});
+    fetchGoals(creator.username);
+  }, [creator]);
 
   // Goals endpoint is public (GET /api/goals/:username), keyed by username
   // rather than needing auth — only create/edit require the owner's token.
@@ -316,6 +270,7 @@ export default function SettingsPage() {
         throw new Error(body.error || 'Failed to save changes');
       }
       setDirty(false);
+      invalidate();
       notify.success('Settings saved.');
     } catch (err) {
       if (isNetworkError(err)) return;
@@ -325,7 +280,7 @@ export default function SettingsPage() {
     }
   };
 
-  if (loading) {
+  if (creatorLoading) {
     return (
       <ProtectedRoute>
         <div className="min-h-screen bg-background">

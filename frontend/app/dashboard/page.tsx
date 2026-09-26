@@ -6,9 +6,9 @@ import { notify } from '@/lib/notify';
 import { HugeiconsIcon } from '@hugeicons/react';
 import { PartyIcon } from '@hugeicons/core-free-icons';
 import { useAuth } from '@/context/AuthContext';
+import { useCreator } from '@/context/CreatorContext';
 import { ProtectedRoute } from '@/components/ProtectedRoute';
 import { AppNav } from '@/components/AppNav';
-import { Skeleton } from '@/components/Skeleton';
 import { DashboardSkeleton } from '@/components/DashboardSkeleton';
 import { DonationHistorySkeleton } from '@/components/DonationHistorySkeleton';
 import { TipChart } from '@/components/TipChart';
@@ -21,17 +21,6 @@ import { API_URL } from '@/lib/api';
 const STELLAR_NETWORK = process.env.NEXT_PUBLIC_STELLAR_NETWORK || 'testnet';
 const explorerTxUrl = (hash: string) =>
   `https://stellar.expert/explorer/${STELLAR_NETWORK}/tx/${hash}`;
-
-interface Creator {
-  id: number;
-  userId: number;
-  username: string;
-  displayName: string;
-  walletAddress: string;
-  avatarUrl: string | null;
-  donationGoal: number | null;
-  acceptsXlm: boolean;
-}
 
 interface Donation {
   id: number | string;
@@ -64,7 +53,7 @@ type ActivityItem =
 
 export default function DashboardPage() {
   const { user, token } = useAuth();
-  const [creator, setCreator] = useState<Creator | null>(null);
+  const { creator, loading } = useCreator();
   const [donations, setDonations] = useState<Donation[]>([]);
   const [withdrawals, setWithdrawals] = useState<Withdrawal[]>([]);
   const [donationPage, setDonationPage] = useState(1);
@@ -74,7 +63,6 @@ export default function DashboardPage() {
   const [loadingMoreDonations, setLoadingMoreDonations] = useState(false);
   const [loadMoreError, setLoadMoreError] = useState<string | null>(null);
   const [infiniteScroll, setInfiniteScroll] = useState(true);
-  const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [showShareCard, setShowShareCard] = useState(false);
   const [showShareModal, setShowShareModal] = useState(false);
@@ -94,32 +82,15 @@ export default function DashboardPage() {
   }, [donations]);
 
   useEffect(() => {
-    const fetchCreator = async () => {
-      if (!user || !token) return;
+    if (!user || !token || !creator) return;
 
+    const fetchData = async () => {
       try {
-        const resCreator = await fetch(`${API_URL}/api/creators/me`, {
-          headers: { 'Authorization': `Bearer ${token}` },
-        });
-
-        if (resCreator.status === 404) {
-          // User hasn't created profile yet
-          setCreator(null);
-          setLoading(false);
-          return;
-        }
-        if (!resCreator.ok) {
-          throw new Error('Failed to fetch your creator profile');
-        }
-
-        const userCreator: Creator = await resCreator.json();
-        setCreator(userCreator);
-
         const [resDonations, resWithdrawals] = await Promise.all([
-          fetch(`${API_URL}/api/donations?creatorUsername=${encodeURIComponent(userCreator.username)}&page=1&limit=20`, {
+          fetch(`${API_URL}/api/donations?creatorUsername=${encodeURIComponent(creator.username)}&page=1&limit=20`, {
             headers: { 'Authorization': `Bearer ${token}` },
           }),
-          fetch(`${API_URL}/api/withdrawals?creatorUsername=${userCreator.username}`, {
+          fetch(`${API_URL}/api/withdrawals?creatorUsername=${creator.username}`, {
             headers: { 'Authorization': `Bearer ${token}` },
           }),
         ]);
@@ -146,13 +117,11 @@ export default function DashboardPage() {
         }
       } catch (err) {
         setError((err as Error).message);
-      } finally {
-        setLoading(false);
       }
     };
 
-    fetchCreator();
-  }, [user, token]);
+    fetchData();
+  }, [user, token, creator]);
 
   const loadMoreDonations = async () => {
     if (!creator || !token || loadingMoreDonations || !hasMoreDonations) return;

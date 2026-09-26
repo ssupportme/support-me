@@ -5,12 +5,34 @@
 
 const MAX_BYTES = 5 * 1024 * 1024; // 5 MB
 const ALLOWED_TYPES = ['image/jpeg', 'image/png', 'image/webp', 'image/gif'];
+const MAX_DIMENSION = 4096;
 
 export class UploadError extends Error {
   constructor(message: string) {
     super(message);
     this.name = 'UploadError';
   }
+}
+
+function validateImageDimensions(file: File): Promise<{ width: number; height: number }> {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    const url = URL.createObjectURL(file);
+    img.onload = () => {
+      URL.revokeObjectURL(url);
+      if (img.width > MAX_DIMENSION || img.height > MAX_DIMENSION) {
+        reject(new UploadError(
+          `Image is too large (${img.width}×${img.height}px). Maximum allowed is ${MAX_DIMENSION}×${MAX_DIMENSION}px.`
+        ));
+      }
+      resolve({ width: img.width, height: img.height });
+    };
+    img.onerror = () => {
+      URL.revokeObjectURL(url);
+      reject(new UploadError('Could not read image dimensions. Please try a different image.'));
+    };
+    img.src = url;
+  });
 }
 
 /**
@@ -25,6 +47,8 @@ export async function uploadAvatar(file: File): Promise<string> {
   if (file.size > MAX_BYTES) {
     throw new UploadError('Image is too large — please keep it under 5 MB.');
   }
+
+  await validateImageDimensions(file);
 
   let sign: {
     cloudName: string;

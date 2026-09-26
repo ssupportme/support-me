@@ -1,0 +1,79 @@
+'use client';
+
+import { createContext, useContext, useState, useEffect, useCallback, ReactNode } from 'react';
+import { useAuth } from '@/context/AuthContext';
+import { API_URL } from '@/lib/api';
+
+interface Creator {
+  id: number;
+  userId: number;
+  username: string;
+  displayName: string;
+  walletAddress: string;
+  avatarUrl: string | null;
+  donationGoal: number | null;
+  acceptsXlm: boolean;
+  socialLinks: Record<string, string> | null;
+  acceptsUsdc: boolean;
+  acceptsUsdt: boolean;
+  presetAmounts?: number[] | null;
+  bio?: string | null;
+}
+
+interface CreatorContextType {
+  creator: Creator | null;
+  loading: boolean;
+  invalidate: () => void;
+}
+
+const CreatorContext = createContext<CreatorContextType | undefined>(undefined);
+
+export function CreatorProvider({ children }: { children: ReactNode }) {
+  const { user, token } = useAuth();
+  const [creator, setCreator] = useState<Creator | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [fetchKey, setFetchKey] = useState(0);
+
+  useEffect(() => {
+    let active = true;
+    const fetchCreator = async () => {
+      if (!user || !token) {
+        if (active) setLoading(false);
+        return;
+      }
+      try {
+        const res = await fetch(`${API_URL}/api/creators/me`, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        if (res.status === 404) {
+          if (active) setCreator(null);
+          return;
+        }
+        if (!res.ok) throw new Error('Failed to load your profile');
+        if (active) setCreator(await res.json());
+      } catch {
+        // Keep previous creator data on network errors
+      } finally {
+        if (active) setLoading(false);
+      }
+    };
+    fetchCreator();
+    return () => { active = false; };
+  }, [user, token, fetchKey]);
+
+  const invalidate = useCallback(() => setFetchKey((k) => k + 1), []);
+
+  return (
+    <CreatorContext.Provider value={{ creator, loading, invalidate }}>
+      {children}
+    </CreatorContext.Provider>
+  );
+}
+
+export function useCreator() {
+  const context = useContext(CreatorContext);
+  if (!context) {
+    throw new Error('useCreator must be used within CreatorProvider');
+  }
+  return context;
+}
