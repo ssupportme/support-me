@@ -20,10 +20,10 @@ import * as Sentry from "@sentry/node";
 
 const NETWORK_PASSPHRASE = Networks.TESTNET;
 
-const getDonationContractId = (): string | undefined =>
-  process.env.NEXT_PUBLIC_DONATION_CONTRACT_ID?.trim() || undefined;
-const getExecutorSecretKey = (): string | undefined =>
-  process.env.EXECUTOR_SECRET_KEY?.trim() || undefined;
+import { config } from "../config";
+
+const getDonationContractId = (): string | undefined => config.donationContractId || undefined;
+const getExecutorSecretKey = (): string | undefined => config.executorSecretKey || undefined;
 const getPollIntervalMs = (): number => {
   const configured = Number(process.env.SUBSCRIPTION_EXECUTOR_POLL_INTERVAL_MS);
   return Number.isFinite(configured) && configured > 0 ? configured : 60_000;
@@ -52,17 +52,14 @@ export class SubscriptionExecutor {
 
   start(): void {
     const donationContractId = getDonationContractId();
-    if (!donationContractId) {
-      log("warn", "SubscriptionExecutor disabled: NEXT_PUBLIC_DONATION_CONTRACT_ID not set");
-      executorHealth.markDisabled();
-      return;
-    }
     const executorSecretKey = getExecutorSecretKey();
-    if (!executorSecretKey) {
-      log("warn", "SubscriptionExecutor disabled: EXECUTOR_SECRET_KEY not set");
-      executorHealth.markDisabled();
-      return;
+    
+    if (!donationContractId || !executorSecretKey) {
+      const msg = "SubscriptionExecutor cannot start: missing NEXT_PUBLIC_DONATION_CONTRACT_ID or EXECUTOR_SECRET_KEY.";
+      log("error", msg);
+      throw new Error(msg);
     }
+    
     if (this.timer) return;
 
     this.keypair = Keypair.fromSecret(executorSecretKey);
