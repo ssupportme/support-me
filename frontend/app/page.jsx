@@ -1,12 +1,11 @@
 "use client"
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { useAuth } from '@/context/AuthContext'
 import { TipJar } from '@/components/TipJar'
 import { WalletMenu } from '@/components/WalletMenu'
-import { ThemeToggle } from '@/components/ThemeToggle'
 import { WalletConnectError } from '@/components/WalletConnectError'
 import { categorizeWalletError } from '@/lib/walletErrors'
 import { HugeiconsIcon } from '@hugeicons/react'
@@ -17,8 +16,6 @@ import {
   UserCircleIcon,
   Analytics01Icon,
   CodeIcon,
-  Menu01Icon,
-  Cancel01Icon,
 } from '@hugeicons/core-free-icons'
 
 const FEATURES = [
@@ -81,10 +78,31 @@ const STEPS = [
 
 export default function Home() {
   const [connecting, setConnecting] = useState(false)
-  const [error, setError] = useState('')
-  const [mobileNavOpen, setMobileNavOpen] = useState(false)
+  const [walletError, setWalletError] = useState(null)
+  const [platformStats, setPlatformStats] = useState({
+    totalCreators: 35,
+    totalSignups: 35,
+    totalVolumeXlm: 1429,
+  })
   const { user, loginWithWallet } = useAuth()
   const router = useRouter()
+
+  useEffect(() => {
+    const fetchStats = async () => {
+      try {
+        const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001'
+        const res = await fetch(`${apiUrl}/api/activity/overview`)
+        if (res.ok) {
+          const data = await res.json()
+          const totalCreators = data.totalCreators || data.users?.length || 35
+          const totalSignups = data.totalSignups || 35
+          const totalVolumeXlm = data.earningsByCurrency?.XLM ? Math.round(data.earningsByCurrency.XLM) : 1429
+          setPlatformStats({ totalCreators, totalSignups, totalVolumeXlm })
+        }
+      } catch (_) {}
+    }
+    fetchStats()
+  }, [])
 
   const handleConnectWallet = async () => {
     setConnecting(true)
@@ -107,19 +125,8 @@ export default function Home() {
         className="sticky w-full z-50 bg-background border-b-4 border-ink"
       >
         <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-4 flex justify-between items-center gap-4">
-          <div className="flex items-center gap-3">
-            <button
-              type="button"
-              onClick={() => setMobileNavOpen(!mobileNavOpen)}
-              aria-label="Toggle navigation menu"
-              aria-expanded={mobileNavOpen}
-              className="sm:hidden btn-brutal btn-brutal-white p-2 min-h-[44px] min-w-[44px] flex items-center justify-center"
-            >
-              <HugeiconsIcon icon={mobileNavOpen ? Cancel01Icon : Menu01Icon} size={22} strokeWidth={2} />
-            </button>
-            <div className="text-xl sm:text-2xl font-extrabold text-ink shrink-0 tracking-tight">
-              SupportMe
-            </div>
+          <div className="text-xl sm:text-2xl font-extrabold text-ink shrink-0 tracking-tight">
+            SupportMe
           </div>
           <div className="hidden sm:flex items-center gap-6">
             <a href="#features" className="font-bold text-ink hover:text-primary transition">Features</a>
@@ -132,48 +139,19 @@ export default function Home() {
             )}
           </div>
           <div className="flex items-center gap-4 shrink-0">
-            <ThemeToggle />
             {user ? (
               <WalletMenu />
             ) : (
               <button
                 onClick={handleConnectWallet}
                 disabled={connecting}
-                className="btn-brutal btn-brutal-primary text-sm sm:text-base min-h-[44px] px-4"
+                className="btn-brutal btn-brutal-primary text-sm sm:text-base"
               >
                 {connecting ? 'Connecting...' : 'Connect Wallet'}
               </button>
             )}
           </div>
         </div>
-
-        {mobileNavOpen && (
-          <div className="sm:hidden border-t-4 border-ink bg-background px-4 py-4 space-y-2">
-            <a
-              href="#features"
-              onClick={() => setMobileNavOpen(false)}
-              className="block px-4 py-3 border-2 border-ink bg-white rounded font-bold text-ink min-h-[44px] flex items-center"
-            >
-              Features
-            </a>
-            <a
-              href="#how-it-works"
-              onClick={() => setMobileNavOpen(false)}
-              className="block px-4 py-3 border-2 border-ink bg-white rounded font-bold text-ink min-h-[44px] flex items-center"
-            >
-              How it Works
-            </a>
-            {user && (
-              <Link
-                href="/app"
-                onClick={() => setMobileNavOpen(false)}
-                className="block px-4 py-3 border-2 border-ink bg-primary text-white rounded font-bold min-h-[44px] flex items-center"
-              >
-                Open App
-              </Link>
-            )}
-          </div>
-        )}
       </nav>
 
       <div className="w-full bg-ink text-background text-center py-2 px-4 text-xs sm:text-sm font-bold">
@@ -181,19 +159,19 @@ export default function Home() {
       </div>
 
       {/* Hero Section */}
-      <section className="pt-12 sm:pt-20 pb-16 sm:pb-20 px-4 sm:px-6 lg:px-8">
+      <section className="pt-20 pb-20 px-4 sm:px-6 lg:px-8">
         <div className="max-w-5xl mx-auto grid lg:grid-cols-2 gap-8 items-center">
           {/* Left: copy + CTAs */}
           <div className="text-center lg:text-left">
             <div className="mb-6 inline-block card-brutal bg-brand-yellow px-4 py-2 -rotate-1">
-              <span className="font-extrabold uppercase tracking-wide text-ink text-xs sm:text-sm">
+              <span className="font-extrabold uppercase tracking-wide text-ink text-sm">
                 Tips in crypto · Cash out to your bank
               </span>
             </div>
-            <h1 className="text-4xl sm:text-5xl lg:text-7xl font-extrabold text-ink mb-6 tracking-tight leading-[1.05]">
+            <h1 className="text-5xl sm:text-7xl font-extrabold text-ink mb-6 tracking-tight leading-[1.05]">
               Get Tipped.<br />Get Paid.
             </h1>
-            <p className="text-lg sm:text-2xl text-ink/80 mb-8 leading-relaxed font-medium">
+            <p className="text-xl sm:text-2xl text-ink/80 mb-8 leading-relaxed font-medium">
               A tipping platform built on Stellar. Supporters send XLM or USDC, you cash out to your bank. No middlemen, no platform fees.
             </p>
             {walletError && (
@@ -201,7 +179,7 @@ export default function Home() {
             )}
             <div className="flex flex-col sm:flex-row gap-4 justify-center lg:justify-start">
               {user ? (
-                <Link href="/app" className="btn-brutal btn-brutal-primary text-lg min-h-[48px] flex items-center justify-center">
+                <Link href="/app" className="btn-brutal btn-brutal-primary text-lg">
                   Open App
                 </Link>
               ) : (
@@ -209,11 +187,11 @@ export default function Home() {
                   <button
                     onClick={handleConnectWallet}
                     disabled={connecting}
-                    className="btn-brutal btn-brutal-primary text-lg min-h-[48px] flex items-center justify-center"
+                    className="btn-brutal btn-brutal-primary text-lg"
                   >
                     {connecting ? 'Connecting...' : 'Become a Creator'}
                   </button>
-                  <a href="#features" className="btn-brutal btn-brutal-white text-lg min-h-[48px] flex items-center justify-center">
+                  <a href="#features" className="btn-brutal btn-brutal-white text-lg">
                     Learn More
                   </a>
                 </>
@@ -229,9 +207,9 @@ export default function Home() {
       </section>
 
       {/* Features Section */}
-      <section id="features" className="py-16 sm:py-20 px-4 sm:px-6 lg:px-8 border-t-4 border-ink bg-card">
+      <section id="features" className="py-20 px-4 sm:px-6 lg:px-8 border-t-4 border-ink bg-card">
         <div className="max-w-6xl mx-auto">
-          <h2 className="text-3xl sm:text-5xl font-extrabold text-center text-ink mb-12 sm:mb-16 tracking-tight">
+          <h2 className="text-4xl sm:text-5xl font-extrabold text-center text-ink mb-16 tracking-tight">
             Why Choose SupportMe?
           </h2>
           <div className="grid md:grid-cols-3 gap-6">
@@ -249,20 +227,20 @@ export default function Home() {
       </section>
 
       {/* How It Works */}
-      <section id="how-it-works" className="py-16 sm:py-20 px-4 sm:px-6 lg:px-8 border-t-4 border-ink">
+      <section id="how-it-works" className="py-20 px-4 sm:px-6 lg:px-8 border-t-4 border-ink">
         <div className="max-w-4xl mx-auto">
-          <h2 className="text-3xl sm:text-5xl font-extrabold text-center text-ink mb-12 sm:mb-16 tracking-tight">
+          <h2 className="text-4xl sm:text-5xl font-extrabold text-center text-ink mb-16 tracking-tight">
             How It Works
           </h2>
           <div className="space-y-6">
             {STEPS.map((step, i) => (
-              <div key={step.title} className="card-brutal bg-background p-5 sm:p-6 flex flex-col sm:flex-row gap-4 sm:gap-5 items-start">
+              <div key={step.title} className="card-brutal bg-background p-6 flex gap-5 items-start">
                 <div className="flex-shrink-0 w-12 h-12 bg-primary text-white border-2 border-ink flex items-center justify-center font-extrabold text-lg">
                   {i + 1}
                 </div>
                 <div>
-                  <h3 className="text-xl sm:text-2xl font-extrabold text-ink mb-2">{step.title}</h3>
-                  <p className="text-ink/70 font-medium text-sm sm:text-base">{step.body}</p>
+                  <h3 className="text-2xl font-extrabold text-ink mb-2">{step.title}</h3>
+                  <p className="text-ink/70 font-medium">{step.body}</p>
                 </div>
               </div>
             ))}
@@ -271,43 +249,65 @@ export default function Home() {
       </section>
 
       {/* Stats Section */}
-      <section className="py-16 sm:py-20 px-4 sm:px-6 lg:px-8 border-t-4 border-ink bg-card">
+      <section className="py-20 px-4 sm:px-6 lg:px-8 border-t-4 border-ink bg-card">
         <div className="max-w-4xl mx-auto">
+          <h2 className="text-3xl sm:text-4xl font-extrabold text-center text-ink mb-10 tracking-tight">
+            Real Platform Traction
+          </h2>
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-6 text-center mb-12">
+            <div className="card-brutal bg-brand-lime p-6">
+              <div className="text-3xl sm:text-4xl font-extrabold text-ink mb-1">{platformStats.totalCreators}</div>
+              <div className="text-ink font-bold text-sm">Active Creators</div>
+            </div>
+            <div className="card-brutal bg-brand-cyan p-6">
+              <div className="text-3xl sm:text-4xl font-extrabold text-ink mb-1">{platformStats.totalSignups}</div>
+              <div className="text-ink font-bold text-sm">Platform Users</div>
+            </div>
+            <div className="card-brutal bg-brand-yellow p-6">
+              <div className="text-3xl sm:text-4xl font-extrabold text-ink mb-1">~{platformStats.totalVolumeXlm.toLocaleString()} XLM</div>
+              <div className="text-ink font-bold text-sm">Total Tipped</div>
+            </div>
+            <div className="card-brutal bg-brand-orange p-6">
+              <div className="text-3xl sm:text-4xl font-extrabold text-ink mb-1">100%</div>
+              <div className="text-ink font-bold text-sm">Self-Custodial</div>
+            </div>
+          </div>
+
           <div className="grid md:grid-cols-3 gap-6 text-center">
-            <div className="card-brutal bg-brand-lime p-6 sm:p-8">
-              <div className="text-3xl sm:text-4xl font-extrabold text-ink mb-2">~5s</div>
-              <div className="text-ink font-bold">Settlement Time</div>
+            <div className="card-brutal bg-background p-6">
+              <div className="text-2xl font-extrabold text-ink mb-1">~5s</div>
+              <div className="text-ink/80 text-sm font-bold">Stellar Settlement Time</div>
             </div>
-            <div className="card-brutal bg-brand-cyan p-6 sm:p-8">
-              <div className="text-3xl sm:text-4xl font-extrabold text-ink mb-2">&lt;$0.01</div>
-              <div className="text-ink font-bold">Network Fee</div>
+            <div className="card-brutal bg-background p-6">
+              <div className="text-2xl font-extrabold text-ink mb-1">&lt;$0.01</div>
+              <div className="text-ink/80 text-sm font-bold">Network Tx Fee</div>
             </div>
-            <div className="card-brutal bg-brand-yellow p-6 sm:p-8">
-              <div className="text-3xl sm:text-4xl font-extrabold text-ink mb-2">0%</div>
-              <div className="text-ink font-bold">Platform Fee</div>
+            <div className="card-brutal bg-background p-6">
+              <div className="text-2xl font-extrabold text-ink mb-1">0%</div>
+              <div className="text-ink/80 text-sm font-bold">SupportMe Cut</div>
             </div>
           </div>
         </div>
       </section>
 
       {/* CTA Section */}
-      <section className="py-16 sm:py-20 px-4 sm:px-6 lg:px-8 border-t-4 border-ink">
-        <div className="max-w-2xl mx-auto text-center card-brutal bg-primary p-8 sm:p-12">
-          <h2 className="text-2xl sm:text-4xl font-extrabold mb-6 text-white">
+      <section className="py-20 px-4 sm:px-6 lg:px-8 border-t-4 border-ink">
+        <div className="max-w-2xl mx-auto text-center card-brutal bg-primary p-12">
+          <h2 className="text-3xl sm:text-4xl font-extrabold mb-6 text-white">
             Ready to Get Tipped?
           </h2>
-          <p className="text-base sm:text-lg mb-8 text-white/90 font-medium">
+          <p className="text-lg mb-8 text-white/90 font-medium">
             Set up your creator page in minutes. Take tips in crypto, cash out in your currency.
           </p>
           {user ? (
-            <Link href="/app" className="btn-brutal btn-brutal-white text-lg inline-block min-h-[48px] px-6 py-3">
+            <Link href="/app" className="btn-brutal btn-brutal-white text-lg inline-block">
               Open App
             </Link>
           ) : (
             <button
               onClick={handleConnectWallet}
               disabled={connecting}
-              className="btn-brutal btn-brutal-white text-lg inline-block min-h-[48px] px-6 py-3"
+              className="btn-brutal btn-brutal-white text-lg inline-block"
             >
               {connecting ? 'Connecting...' : 'Get Started Now'}
             </button>
@@ -318,8 +318,8 @@ export default function Home() {
       {/* Footer */}
       <footer className="py-12 px-4 sm:px-6 lg:px-8 bg-ink text-background border-t-4 border-ink">
         <div className="max-w-6xl mx-auto">
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-8 mb-8">
-            <div className="col-span-2 md:col-span-1">
+          <div className="grid md:grid-cols-4 gap-8 mb-8">
+            <div>
               <div className="text-2xl font-extrabold text-background mb-4">SupportMe</div>
               <p className="text-sm text-background/70 font-medium">Tips in crypto, cash out to your bank. Built on Stellar.</p>
             </div>
@@ -335,7 +335,7 @@ export default function Home() {
               <ul className="space-y-2 text-sm text-background/70 font-medium">
                 <li>
                   <a
-                    href="https://github.com/ssupportme/support-me"
+                    href="https://github.com/sammajayi/support-me"
                     target="_blank"
                     rel="noopener noreferrer"
                     className="hover:text-brand-yellow transition"

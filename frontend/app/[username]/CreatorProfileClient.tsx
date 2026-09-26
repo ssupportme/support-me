@@ -2,11 +2,10 @@
 
 import { useState, useEffect, useMemo, useCallback, use } from 'react';
 import Image from 'next/image';
-import Link from 'next/link';
 import * as StellarSdk from '@stellar/stellar-sdk';
 import { notify } from '@/lib/notify';
 import { HugeiconsIcon } from '@hugeicons/react';
-import { PartyIcon, TwitterIcon, LinkIcon } from '@hugeicons/core-free-icons';
+import { PartyIcon, TwitterLogoIcon, LinkIcon } from '@hugeicons/core-free-icons';
 import { connectWallet } from '@/lib/wallet';
 import {
   categorizeWalletError,
@@ -26,7 +25,6 @@ import { API_URL } from '@/lib/api';
 import { describeDonationFailure } from '@/lib/failures';
 import { useAuth } from '@/context/AuthContext';
 import { Skeleton } from '@/components/Skeleton';
-import { ProfileSkeleton } from '@/components/ProfileSkeleton';
 import { TipJarLoader } from '@/components/TipJarLoader';
 
 
@@ -143,41 +141,13 @@ export default function CreatorProfileClient({ params }: { params: Promise<{ use
     fetchCreator();
   }, [username, fetchGoals]);
 
-  // Load saved asset preference from localStorage on mount
-  useEffect(() => {
-    if (typeof window === 'undefined') return;
-    
-    const savedAsset = localStorage.getItem('supportme-preferred-asset');
-    if (savedAsset) {
-      setAssetCode(savedAsset);
-    }
-  }, []);
-
   // Default the selected asset to the first one the creator accepts, once the
-  // profile loads. If a saved preference exists and is valid for this creator,
-  // use it instead.
+  // profile loads.
   useEffect(() => {
-    if (assetCodes.length > 0) {
-      // Check if the current assetCode is valid for this creator
-      if (!assetCodes.includes(assetCode)) {
-        // Try to load saved preference if it's valid for this creator
-        const savedAsset = typeof window !== 'undefined' ? localStorage.getItem('supportme-preferred-asset') : null;
-        if (savedAsset && assetCodes.includes(savedAsset)) {
-          setAssetCode(savedAsset);
-        } else {
-          // Fall back to first available asset
-          setAssetCode(assetCodes[0]);
-        }
-      }
+    if (assetCodes.length > 0 && !assetCodes.includes(assetCode)) {
+      setAssetCode(assetCodes[0]);
     }
   }, [assetCodes, assetCode]);
-
-  // Save asset preference to localStorage whenever it changes
-  useEffect(() => {
-    if (typeof window === 'undefined' || assetCode === 'XLM') return;
-    
-    localStorage.setItem('supportme-preferred-asset', assetCode);
-  }, [assetCode]);
 
   // Subscribe to the backend's SSE stream so a live donation bumps the goal
   // progress without a refresh.
@@ -225,7 +195,6 @@ export default function CreatorProfileClient({ params }: { params: Promise<{ use
     setConnecting(true);
     try {
       const address = await connectWallet();
-      if (!address) return;
       setUserAddress(address);
       setBalance(await loadAssetBalance(address, assetCode));
       notify.success('Wallet connected!');
@@ -311,19 +280,7 @@ export default function CreatorProfileClient({ params }: { params: Promise<{ use
 
       notify.success('Donation sent successfully!', {
         icon: <HugeiconsIcon icon={PartyIcon} size={18} strokeWidth={1.5} />,
-        description: (
-          <div className="flex flex-col gap-2">
-            {txLink}
-            <a
-              href={`/receipt/${hash}?amount=${encodeURIComponent(donationAmount)}&asset=${encodeURIComponent(assetCode)}&creatorName=${encodeURIComponent(creator.displayName || creator.username)}&creatorUsername=${encodeURIComponent(creator.username)}&message=${encodeURIComponent(donationMessage)}&timestamp=${encodeURIComponent(new Date().toISOString())}`}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="underline text-sm"
-            >
-              View Receipt →
-            </a>
-          </div>
-        ),
+        description: txLink,
       });
 
       // The on-chain transfer already happened; a failure here only means our
@@ -366,9 +323,7 @@ export default function CreatorProfileClient({ params }: { params: Promise<{ use
     try {
       let address = userAddress;
       if (!address) {
-        const connected = await connectWallet();
-        if (!connected) return;
-        address = connected;
+        address = await connectWallet();
         setUserAddress(address);
       }
       if (!address) {
@@ -449,7 +404,18 @@ export default function CreatorProfileClient({ params }: { params: Promise<{ use
   };
 
   if (loading) {
-    return <ProfileSkeleton />;
+    return (
+      <div className="min-h-screen bg-background py-10 px-4">
+        <div className="max-w-md mx-auto">
+          <div className="card-brutal p-8 text-center">
+            <Skeleton className="h-24 w-24 rounded-full mx-auto mb-4" />
+            <Skeleton className="h-8 w-48 mx-auto mb-2" />
+            <Skeleton className="h-5 w-32 mx-auto mb-6" />
+            <Skeleton className="h-10 w-full" />
+          </div>
+        </div>
+      </div>
+    );
   }
 
   if (notFound || !creator) {
@@ -490,7 +456,6 @@ export default function CreatorProfileClient({ params }: { params: Promise<{ use
   return (
     <div className="min-h-screen bg-background py-10 px-4">
       <div className="max-w-md mx-auto space-y-6">
-
         {/* Creator header */}
         <div className="card-brutal p-8 text-center">
           <div className="w-24 h-24 mx-auto mb-4 rounded-full border-4 border-ink overflow-hidden bg-accent-bg flex items-center justify-center">
@@ -542,7 +507,7 @@ export default function CreatorProfileClient({ params }: { params: Promise<{ use
               className="btn-brutal btn-brutal-white px-3 py-2 text-sm flex items-center gap-2"
               aria-label="Share on X/Twitter"
             >
-              <HugeiconsIcon icon={TwitterIcon} size={18} strokeWidth={2} />
+              <HugeiconsIcon icon={TwitterLogoIcon} size={18} strokeWidth={2} />
               Share
             </button>
             <button
@@ -620,13 +585,13 @@ export default function CreatorProfileClient({ params }: { params: Promise<{ use
             <button
               onClick={handleConnectWallet}
               disabled={connecting}
-              className="btn-brutal btn-brutal-primary w-full min-h-[48px] text-base font-extrabold flex items-center justify-center"
+              className="btn-brutal btn-brutal-primary w-full"
             >
               {connecting ? 'Connecting…' : 'Connect Wallet'}
             </button>
           ) : (
             <div className="space-y-4">
-              <div className="card-brutal bg-brand-lime p-3.5 text-sm">
+              <div className="card-brutal bg-brand-lime p-3 text-sm">
                 <p className="text-ink font-medium">Wallet: {userAddress.slice(0, 8)}…</p>
                 <p className="text-ink font-extrabold mt-1">
                   {balance ?? '0.0000'} {assetCode}
@@ -647,7 +612,7 @@ export default function CreatorProfileClient({ params }: { params: Promise<{ use
                           }
                         }}
                         aria-pressed={assetCode === code}
-                        className={`btn-brutal text-sm px-0 min-h-[44px] flex items-center justify-center font-bold ${
+                        className={`btn-brutal text-sm px-0 py-2 ${
                           assetCode === code ? 'btn-brutal-primary' : 'btn-brutal-white'
                         }`}
                       >
@@ -658,106 +623,121 @@ export default function CreatorProfileClient({ params }: { params: Promise<{ use
                 </fieldset>
               )}
 
-              <div>
-                <label htmlFor="donation-amount" className="block text-sm font-bold text-ink mb-2">
-                  Amount ({assetCode})
-                </label>
-                <input
-                  id="donation-amount"
-                  type="number"
-                  min="0.1"
-                  step="0.1"
-                  value={donationAmount}
-                  onChange={(e) => setDonationAmount(e.target.value)}
-                  className="input-brutal min-h-[44px] text-base"
-                />
-              </div>
-
-              <div className="grid grid-cols-4 gap-2">
-                {presets.map((preset) => (
-                  <button
-                    key={preset}
-                    onClick={() => setDonationAmount(preset)}
-                    className={`btn-brutal text-sm px-0 min-h-[44px] flex items-center justify-center font-bold ${
-                      donationAmount === preset ? 'btn-brutal-primary' : 'btn-brutal-white'
-                    }`}
-                  >
-                    {preset}
-                  </button>
-                ))}
-              </div>
-
-              <div>
-                <label htmlFor="donation-message" className="block text-sm font-bold text-ink mb-2">
-                  Message (Optional)
-                </label>
-                <textarea
-                  id="donation-message"
-                  value={donationMessage}
-                  onChange={(e) => setDonationMessage(e.target.value)}
-                    maxLength={MAX_MEMO_LENGTH}
-                  placeholder="Thanks for your work!"
-                  className="input-brutal text-base sm:text-sm"
-                  rows={3}
-                />
-                  <p className="text-xs text-muted mt-1 font-medium">{donationMessage.length}/{MAX_MEMO_LENGTH}</p>
-              </div>
-
-              <div className="flex flex-wrap items-center justify-between gap-3 min-h-[44px]">
-                <label className="flex items-center gap-2 text-sm font-bold text-ink cursor-pointer py-1">
-                  <input
-                    type="checkbox"
-                    checked={recurring}
-                    onChange={(e) => setRecurring(e.target.checked)}
-                    className="h-5 w-5 accent-primary min-h-[20px] min-w-[20px]"
-                  />
-                  Make it recurring
-                </label>
-
-                {recurring && (
-                  <div className="flex items-center gap-1.5 shrink-0">
-                    <select
-                      value={intervalChoice}
-                      onChange={(e) => setIntervalChoice(e.target.value as typeof intervalChoice)}
-                      className="input-brutal text-sm py-2 min-h-[44px] w-auto"
-                    >
-                      <option value="7">Weekly</option>
-                      <option value="30">Monthly</option>
-                      <option value="custom">Custom</option>
-                    </select>
-                    {intervalChoice === 'custom' && (
+              {(() => {
+                const parsedAmt = parseFloat(donationAmount);
+                const isAmountValid = Number.isFinite(parsedAmt) && parsedAmt >= 0.1;
+                return (
+                  <>
+                    <div>
+                      <label htmlFor="donation-amount" className="block text-sm font-bold text-ink mb-2">
+                        Amount ({assetCode})
+                      </label>
                       <input
+                        id="donation-amount"
                         type="number"
-                        min="1"
-                        max={MAX_CHARGE_INTERVAL_DAYS}
-                        step="1"
-                        value={customDays}
-                        onChange={(e) => setCustomDays(e.target.value)}
-                        aria-label="Days between charges"
-                        title={`Up to ${MAX_CHARGE_INTERVAL_DAYS} days`}
-                        className="input-brutal text-sm py-2 min-h-[44px] w-16"
+                        min="0.1"
+                        step="0.1"
+                        value={donationAmount}
+                        onChange={(e) => setDonationAmount(e.target.value)}
+                        className={`input-brutal ${!isAmountValid ? 'border-red-500' : ''}`}
                       />
+                      {!isAmountValid && (
+                        <p className="text-xs text-red-600 font-bold mt-1" role="alert">
+                          {donationAmount.trim() === ''
+                            ? 'Please enter a donation amount.'
+                            : 'Amount must be a positive number (minimum 0.1).'}
+                        </p>
+                      )}
+                    </div>
+
+                    <div className="grid grid-cols-4 gap-2">
+                      {presets.map((preset) => (
+                        <button
+                          key={preset}
+                          onClick={() => setDonationAmount(preset)}
+                          className={`btn-brutal text-sm px-0 py-2 ${
+                            donationAmount === preset ? 'btn-brutal-primary' : 'btn-brutal-white'
+                          }`}
+                        >
+                          {preset}
+                        </button>
+                      ))}
+                    </div>
+
+                    <div>
+                      <label htmlFor="donation-message" className="block text-sm font-bold text-ink mb-2">
+                        Message (Optional)
+                      </label>
+                      <textarea
+                        id="donation-message"
+                        value={donationMessage}
+                        onChange={(e) => setDonationMessage(e.target.value)}
+                        maxLength={MAX_MEMO_LENGTH}
+                        placeholder="Thanks for your work!"
+                        className="input-brutal text-sm"
+                        rows={3}
+                      />
+                      <p className="text-xs text-muted mt-1 font-medium">{donationMessage.length}/{MAX_MEMO_LENGTH}</p>
+                    </div>
+
+                    <div className="flex items-center justify-between gap-3">
+                      <label className="flex items-center gap-2 text-sm font-bold text-ink">
+                        <input
+                          type="checkbox"
+                          checked={recurring}
+                          onChange={(e) => setRecurring(e.target.checked)}
+                          className="h-4 w-4 accent-primary"
+                        />
+                        Make it recurring
+                      </label>
+
+                      {recurring && (
+                        <div className="flex items-center gap-1.5">
+                          <select
+                            value={intervalChoice}
+                            onChange={(e) => setIntervalChoice(e.target.value as typeof intervalChoice)}
+                            className="input-brutal text-sm py-1.5 w-auto"
+                          >
+                            <option value="7">Weekly</option>
+                            <option value="30">Monthly</option>
+                            <option value="custom">Custom</option>
+                          </select>
+                          {intervalChoice === 'custom' && (
+                            <input
+                              type="number"
+                              min="1"
+                              max={MAX_CHARGE_INTERVAL_DAYS}
+                              step="1"
+                              value={customDays}
+                              onChange={(e) => setCustomDays(e.target.value)}
+                              aria-label="Days between charges"
+                              title={`Up to ${MAX_CHARGE_INTERVAL_DAYS} days`}
+                              className="input-brutal text-sm py-1.5 w-14"
+                            />
+                          )}
+                        </div>
+                      )}
+                    </div>
+
+                    {recurring && (
+                      <p className="text-xs text-muted font-medium -mt-2">
+                        You&apos;ll sign once to approve several charges in advance (fewer for longer
+                        intervals), so you&apos;re not re-signing every{' '}
+                        {intervalChoice === '7' ? 'week' : intervalChoice === '30' ? 'month' : 'period'}.
+                        Cancel anytime from Subscriptions.
+                      </p>
                     )}
-                  </div>
-                )}
-              </div>
 
-              {recurring && (
-                <p className="text-xs text-muted font-medium -mt-2">
-                  You&apos;ll sign once to approve several charges in advance (fewer for longer
-                  intervals), so you&apos;re not re-signing every{' '}
-                  {intervalChoice === '7' ? 'week' : intervalChoice === '30' ? 'month' : 'period'}.
-                  Cancel anytime from Subscriptions.
-                </p>
-              )}
-
-              <button
-                onClick={recurring ? handleStartSubscription : handleSendDonation}
-                disabled={sending || !creator.walletAddress}
-                className="btn-brutal btn-brutal-lime w-full min-h-[48px] text-base font-extrabold flex items-center justify-center"
-              >
-                {recurring ? 'Start Recurring Donation' : 'Send Donation'}
-              </button>
+                    <button
+                      onClick={recurring ? handleStartSubscription : handleSendDonation}
+                      disabled={sending || !creator.walletAddress || !isAmountValid}
+                      className="btn-brutal btn-brutal-lime w-full disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      {recurring ? 'Start Recurring Donation' : 'Send Donation'}
+                    </button>
+                  </>
+                );
+              })()}
             </div>
           )}
         </div>
