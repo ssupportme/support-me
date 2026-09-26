@@ -52,24 +52,59 @@ export function TipJar({ widthClass = 'w-[260px] sm:w-[320px]' }: { widthClass?:
       return;
     }
 
-    let fallTimer: number;
-    let cycleTimer: number;
+    let fallTimer: number | null = null;
+    let cycleTimer: number | null = null;
+    let isMounted = true;
+
+    const clearAllTimers = () => {
+      if (fallTimer !== null) {
+        window.clearTimeout(fallTimer);
+        fallTimer = null;
+      }
+      if (cycleTimer !== null) {
+        window.clearTimeout(cycleTimer);
+        cycleTimer = null;
+      }
+    };
+
+    const scheduleCycle = () => {
+      clearAllTimers();
+      if (!isMounted || (typeof document !== 'undefined' && document.hidden)) return;
+      cycleTimer = window.setTimeout(cycle, GAP_MS);
+    };
 
     const cycle = () => {
+      if (!isMounted || (typeof document !== 'undefined' && document.hidden)) return;
       setDropping(true);
       fallTimer = window.setTimeout(() => {
-        // Coin lands: bump the count, wrapping back to an empty jar once full.
+        if (!isMounted || (typeof document !== 'undefined' && document.hidden)) return;
         setLanded((n) => (n + 1) % (RESTING_SPOTS.length + 1));
         setDropping(false);
-        cycleTimer = window.setTimeout(cycle, GAP_MS);
+        scheduleCycle();
       }, FALL_MS);
     };
 
-    cycleTimer = window.setTimeout(cycle, GAP_MS);
+    const handleVisibilityChange = () => {
+      if (document.hidden) {
+        clearAllTimers();
+        if (isMounted) setDropping(false);
+      } else {
+        scheduleCycle();
+      }
+    };
+
+    if (typeof document !== 'undefined') {
+      document.addEventListener('visibilitychange', handleVisibilityChange);
+    }
+
+    scheduleCycle();
 
     return () => {
-      window.clearTimeout(fallTimer);
-      window.clearTimeout(cycleTimer);
+      isMounted = false;
+      clearAllTimers();
+      if (typeof document !== 'undefined') {
+        document.removeEventListener('visibilitychange', handleVisibilityChange);
+      }
     };
   }, []);
 
