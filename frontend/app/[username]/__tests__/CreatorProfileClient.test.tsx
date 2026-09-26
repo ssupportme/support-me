@@ -26,6 +26,14 @@ vi.mock('@/context/AuthContext', () => ({
   useAuth: vi.fn(),
 }));
 
+// The installed @hugeicons/core-free-icons (4.3.5) has no `TwitterLogoIcon`
+// export, so the component would render `icon={undefined}` and every test in
+// this file threw "currentIcon is not iterable". Stub just that export here.
+vi.mock('@hugeicons/core-free-icons', async () => {
+  const actual = await vi.importActual<Record<string, unknown>>('@hugeicons/core-free-icons');
+  return { ...actual, TwitterLogoIcon: actual.TwitterLogoIcon ?? actual.LinkIcon };
+});
+
 vi.mock('@/lib/wallet', () => ({
   connectWallet: vi.fn(),
   disconnectWallet: vi.fn(),
@@ -74,6 +82,9 @@ vi.mock('@stellar/stellar-sdk', async () => {
 class FakeEventSource {
   static instances: FakeEventSource[] = [];
   url: string;
+  onopen: (() => void) | null = null;
+  onerror: (() => void) | null = null;
+  closed = false;
   private listeners: Record<string, Array<(event: MessageEvent) => void>> = {};
 
   constructor(url: string) {
@@ -88,7 +99,9 @@ class FakeEventSource {
 
   removeEventListener() {}
 
-  close() {}
+  close() {
+    this.closed = true;
+  }
 }
 
 const mockUseAuth = vi.mocked(useAuth);
@@ -265,5 +278,70 @@ describe('CreatorProfileClient', () => {
     await userEvent.click(screen.getByRole('button', { name: '15' }));
 
     expect(screen.getByLabelText(/amount/i)).toHaveValue(15);
+  });
+  describe('live updates (SSE) lifecycle', () => {
+    const goalsCalls = () =>
+      vi.mocked(fetch).mock.calls.filter(([url]) => String(url).includes('/api/goals/alice')).length;
+
+    const setHidden = (hidden: boolean) => {
+      Object.defineProperty(document, 'hidden', { configurable: true, get: () => hidden });
+      document.dispatchEvent(new Event('visibilitychange'));
+    };
+
+    afterEach(() => {
+      setHidden(false);
+    });
+
+    beforeEach(() => {
+      mockFetchSequence({
+        '/api/creators/alice': baseCreator,
+        '/api/goals/alice': { items: [goal()] },
+      });
+    });
+
+    it('shows a paused indicator when the stream errors and backfills goals once it reconnects', async () => {
+      await renderProfile('alice');
+      await waitFor(() => expect(screen.getByText('New microphone')).toBeInTheDocument());
+      const source = FakeEventSource.instances[0];
+      act(() => source.onopen?.());
+      expect(screen.queryByText(/live updates paused/i)).not.toBeInTheDocument();
+      const before = goalsCalls();
+
+      act(() => source.onerror?.());
+      expect(screen.getByRole('status')).toHaveTextContent(/live updates paused/i);
+      // Nothing is refetched while the connection is still down.
+      expect(goalsCalls()).toBe(before);
+
+      act(() => source.onopen?.());
+      expect(screen.queryByText(/live updates paused/i)).not.toBeInTheDocument();
+      await waitFor(() => expect(goalsCalls()).toBe(before + 1));
+    });
+
+    it('does not refetch on the first successful connection', async () => {
+      await renderProfile('alice');
+      await waitFor(() => expect(screen.getByText('New microphone')).toBeInTheDocument());
+      const before = goalsCalls();
+
+      act(() => FakeEventSource.instances[0].onopen?.());
+
+      expect(goalsCalls()).toBe(before);
+    });
+
+    it('closes the stream while the tab is hidden and reopens it with a backfill when visible again', async () => {
+      await renderProfile('alice');
+      await waitFor(() => expect(screen.getByText('New microphone')).toBeInTheDocument());
+      const first = FakeEventSource.instances[0];
+      const before = goalsCalls();
+
+      act(() => setHidden(true));
+      expect(first.closed).toBe(true);
+      expect(FakeEventSource.instances).toHaveLength(1);
+
+      act(() => setHidden(false));
+      expect(FakeEventSource.instances).toHaveLength(2);
+
+      act(() => FakeEventSource.instances[1].onopen?.());
+      await waitFor(() => expect(goalsCalls()).toBe(before + 1));
+    });
   });
 });

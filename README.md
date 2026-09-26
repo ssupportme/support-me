@@ -6,6 +6,47 @@ SupportMe is a creator tipping and donation platform. This enables creators on S
 
 **Live demo**: [https://support-mee.vercel.app/](https://support-mee.vercel.app/) · **Demo video**: [Loom](https://www.loom.com/share/4468e89fd67745d39fb64033e6660b16)
 
+## Architecture
+
+```mermaid
+flowchart LR
+    Supporter(["Supporter / Creator<br/>(browser + Stellar wallet)"])
+    FE["Frontend<br/>Next.js"]
+    BE["Backend<br/>Express + Prisma"]
+    DB[("PostgreSQL")]
+    Donation["donation contract<br/>(Soroban)"]
+    Registry["creator-registry contract<br/>(Soroban)"]
+    Listener["Soroban event listener<br/>(in backend)"]
+    Executor["Subscription executor<br/>(in backend)"]
+    Anchor["SEP-24 anchor<br/>(testanchor.stellar.org or local anchor/)"]
+
+    Supporter --> FE
+    FE -- "REST + SSE" --> BE
+    BE --> DB
+
+    %% One-off donations
+    FE -- "donate (signed by wallet)" --> Donation
+    Donation -- "record_donation" --> Registry
+    Donation -. "donation events" .-> Listener
+    Listener --> DB
+    Listener -. "live update" .-> BE
+
+    %% Recurring subscriptions
+    FE -- "subscribe + approve allowance" --> Donation
+    Executor -- "charge_subscription (executor key)" --> Donation
+    BE --- Executor
+
+    %% Cash-out
+    FE -- "SEP-10 auth + SEP-24 withdraw" --> Anchor
+    Anchor -- "fiat payout" --> Supporter
+```
+
+- **Donations:** the frontend submits `donate` to the donation contract (signed by the user's wallet). The contract moves the funds to the creator and reports the donation to the registry. The backend's event listener picks the event up, stores it in Postgres and pushes it to open profile pages over SSE.
+- **Subscriptions:** the supporter subscribes and grants the donation contract an allowance. The backend's subscription executor calls `charge_subscription` when a charge is due; the contract draws on the allowance.
+- **Cash-outs:** the creator withdraws from the frontend through a SEP-24 anchor (SEP-10 sign-in, hosted KYC/bank form, on-chain transfer, status polling). See [`anchor/README.md`](anchor/README.md) to run a local anchor.
+
+For the full picture see [`docs/architecture.md`](docs/architecture.md).
+
 ## Smart Contracts (Stellar Testnet)
 
 Donations are split across two independently deployed Soroban contracts that

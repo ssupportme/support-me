@@ -75,6 +75,8 @@ export default function CreatorProfileClient({ params }: { params: Promise<{ use
   const { token, loginWithWallet } = useAuth();
   const [creator, setCreator] = useState<Creator | null>(null);
   const [goals, setGoals] = useState<Goal[]>([]);
+  // 'paused' = the SSE stream dropped and the browser is retrying.
+  const [liveStatus, setLiveStatus] = useState<'connecting' | 'live' | 'paused'>('connecting');
   const [loading, setLoading] = useState(true);
   const [notFound, setNotFound] = useState(false);
 
@@ -162,11 +164,15 @@ export default function CreatorProfileClient({ params }: { params: Promise<{ use
   }, [assetCodes, assetCode]);
 
   // Subscribe to the backend's SSE stream so a live donation bumps the goal
-  // progress without a refresh.
+  // progress without a refresh. The stream is closed while the tab is hidden
+  // (so many open profile tabs don't each hold a connection), and whenever it
+  // is re-established after an error or a hidden period the goals are refetched
+  // to backfill anything that arrived while it was down.
   useEffect(() => {
     if (!creator?.walletAddress) return;
 
-    const source = new EventSource(`${API_URL}/api/events`);
+    let source: EventSource | null = null;
+    let needsBackfill = false;
 
     const handleDonation = (event: MessageEvent) => {
       let payload: { creator: string };
@@ -183,11 +189,47 @@ export default function CreatorProfileClient({ params }: { params: Promise<{ use
       void fetchGoals();
     };
 
-    source.addEventListener('donation', handleDonation);
+    const open = () => {
+      if (source) return;
+      setLiveStatus('connecting');
+      const next = new EventSource(`${API_URL}/api/events`);
+      next.onopen = () => {
+        setLiveStatus('live');
+        if (needsBackfill) {
+          needsBackfill = false;
+          void fetchGoals();
+        }
+      };
+      next.onerror = () => {
+        needsBackfill = true;
+        setLiveStatus('paused');
+      };
+      next.addEventListener('donation', handleDonation);
+      source = next;
+    };
 
-    return () => {
+    const close = () => {
+      if (!source) return;
       source.removeEventListener('donation', handleDonation);
       source.close();
+      source = null;
+    };
+
+    const handleVisibilityChange = () => {
+      if (document.hidden) {
+        close();
+      } else {
+        needsBackfill = true;
+        open();
+      }
+    };
+
+    if (!document.hidden) open();
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+      close();
     };
   }, [creator?.walletAddress, fetchGoals]);
 
@@ -531,6 +573,12 @@ export default function CreatorProfileClient({ params }: { params: Promise<{ use
               Copy Link
             </button>
           </div>
+
+          {liveStatus === 'paused' && (
+            <p role="status" className="mt-4 text-xs font-bold text-ink">
+              Live updates paused — reconnecting…
+            </p>
+          )}
 
           {goals.length > 0 && (
             <div className="mt-6 pt-6 border-t-2 border-ink text-left space-y-4">
