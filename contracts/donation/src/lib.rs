@@ -20,6 +20,7 @@ const REGISTRY_KEY: Symbol = symbol_short!("registry");
 const SUBSCRIPTIONS_KEY: Symbol = symbol_short!("subs");
 const SUB_COUNTER: Symbol = symbol_short!("sub_ctr");
 const EXECUTOR_KEY: Symbol = symbol_short!("executor");
+const ALLOWED_TOKEN_KEY: Symbol = symbol_short!("allowed");
 pub const MAX_MEMO_LENGTH: u32 = 140;
 
 /// Emitted whenever a donation is settled on-chain. `donor` and `creator`
@@ -110,6 +111,33 @@ impl DonationContract {
         let registry = Self::registry_address(&env);
         let args: SorobanVec<Val> = (creator,).into_val(&env);
         env.invoke_contract(&registry, &Symbol::new(&env, "get_creator"), args)
+    }
+
+    /// Admin-gated: adds a token address to the allowlist.
+    pub fn add_allowed_token(env: Env, token: Address) {
+        let admin: Address = env
+            .storage()
+            .instance()
+            .get(&ADMIN_KEY)
+            .expect("donation contract not initialized: call initialize() first");
+        admin.require_auth();
+        env.storage().instance().set(&(ALLOWED_TOKEN_KEY, token), &true);
+    }
+
+    /// Admin-gated: removes a token address from the allowlist.
+    pub fn remove_allowed_token(env: Env, token: Address) {
+        let admin: Address = env
+            .storage()
+            .instance()
+            .get(&ADMIN_KEY)
+            .expect("donation contract not initialized: call initialize() first");
+        admin.require_auth();
+        env.storage().instance().remove(&(ALLOWED_TOKEN_KEY, token));
+    }
+
+    /// Checks if a token is currently in the allowlist.
+    pub fn is_token_allowed(env: Env, token: Address) -> bool {
+        env.storage().instance().has(&(ALLOWED_TOKEN_KEY, token))
     }
 
     /// Transfer `amount` of `token` from `donor` to `creator`, record the
