@@ -61,6 +61,7 @@ beforeEach(() => {
     callback(mockedPrisma)
   );
   mockedPrisma.donation.count.mockResolvedValue(0);
+  mockedPrisma.donationIdempotencyKey.findMany.mockResolvedValue([]);
   mockedPrisma.donationIdempotencyKey.findUnique.mockResolvedValue(null);
   // No expired idempotency keys to clean up unless a test says otherwise.
   mockedPrisma.donationIdempotencyKey.findMany.mockResolvedValue([]);

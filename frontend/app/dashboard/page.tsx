@@ -3,6 +3,7 @@
 import { useState, useEffect, useRef, useLayoutEffect } from 'react';
 import Link from 'next/link';
 import { notify } from '@/lib/notify';
+import { donationsCsvFilename, donationsToCsv, downloadCsv } from '@/lib/csv';
 import { HugeiconsIcon } from '@hugeicons/react';
 import { PartyIcon } from '@hugeicons/core-free-icons';
 import { useAuth } from '@/context/AuthContext';
@@ -122,6 +123,36 @@ export default function DashboardPage() {
 
     fetchData();
   }, [user, token, creator]);
+
+  const [exporting, setExporting] = useState(false);
+
+  // Exports the creator's full donation history (not just the pages loaded on
+  // screen) by walking every page of the API, then downloads it as a CSV.
+  const exportDonationsCsv = async () => {
+    if (!creator || !token || exporting) return;
+    setExporting(true);
+    try {
+      const all: Donation[] = [];
+      const pageSize = 100;
+      const maxPages = 200;
+      for (let page = 1; page <= maxPages; page++) {
+        const response = await fetch(
+          `${API_URL}/api/donations?creatorUsername=${encodeURIComponent(creator.username)}&page=${page}&limit=${pageSize}`,
+          { headers: { Authorization: `Bearer ${token}` } }
+        );
+        if (!response.ok) throw new Error('The server returned an error. Please try again.');
+        const data = await response.json();
+        all.push(...((Array.isArray(data) ? data : data.items) || []));
+        if (Array.isArray(data) || !data.pagination || page >= data.pagination.totalPages) break;
+      }
+      downloadCsv(donationsCsvFilename(creator.username), donationsToCsv(all));
+      notify.success(`Exported ${all.length} donation${all.length === 1 ? '' : 's'}`);
+    } catch (err) {
+      notify.error('Could not export donations', err);
+    } finally {
+      setExporting(false);
+    }
+  };
 
   const loadMoreDonations = async () => {
     if (!creator || !token || loadingMoreDonations || !hasMoreDonations) return;
@@ -364,13 +395,16 @@ export default function DashboardPage() {
 
           {/* Recent Activity — tips received and cash-outs, newest first */}
           <div className="card-brutal p-4 sm:p-6 overflow-x-auto">
-            <div className="flex items-baseline justify-between gap-3 mb-4">
+            <div className="flex items-center justify-between gap-3 mb-4">
               <h2 className="text-lg font-extrabold text-ink">Recent Activity</h2>
-              {totalDonations !== null && (
-                <p className="text-xs font-bold text-muted tabular-nums">
-                  {donations.length} of {totalDonations} tips
-                </p>
-              )}
+              <button
+                type="button"
+                onClick={exportDonationsCsv}
+                disabled={exporting || donations.length === 0}
+                className="btn-brutal btn-brutal-white px-3 py-1.5 text-xs"
+              >
+                {exporting ? 'Exporting…' : 'Export CSV'}
+              </button>
             </div>
             {activity.length === 0 ? (
               <p className="text-muted font-medium">No activity yet. Share your profile link to get started!</p>

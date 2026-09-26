@@ -24,9 +24,7 @@ router.get(
     };
 
     // Require explicit ownership: caller must be requesting their own subscriptions
-    // or be the creator viewing subscribers. A magic-link/OAuth account with no
-    // connected wallet has a null address, which can never match a real wallet
-    // and so simply matches no rows below.
+    // or be the creator viewing subscribers.
     let targetSupporterAddress: string | null | undefined = supporterAddress;
 
     if (targetSupporterAddress && targetSupporterAddress !== req.user.walletAddress) {

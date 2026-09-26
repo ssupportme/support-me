@@ -64,6 +64,13 @@ if (process.env.SENTRY_DSN) {
   });
 }
 
+// Set TRUST_PROXY to the number of reverse-proxy hops in front of the API (e.g.
+// 1 on Railway) so req.ip, and therefore the per-IP rate limits, reflects the
+// real client instead of the proxy. Unset keeps Express's default.
+if (process.env.TRUST_PROXY) {
+  app.set("trust proxy", Number(process.env.TRUST_PROXY));
+}
+
 app.use(requestLogger);
 app.use(cors(corsOptions));
 

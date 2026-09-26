@@ -21,6 +21,7 @@ import * as Sentry from "@sentry/node";
 const NETWORK_PASSPHRASE = Networks.TESTNET;
 
 import { config } from "../config";
+import { toAmount } from "../lib/money";
 
 const getDonationContractId = (): string | undefined => config.donationContractId || undefined;
 const getExecutorSecretKey = (): string | undefined => config.executorSecretKey || undefined;
@@ -185,7 +186,7 @@ export class SubscriptionExecutor {
       });
       // A recurring donation applies to goal progress the same way a
       // one-off donation does (see goalService.ts's applyDonationToGoals).
-      await applyDonationToGoals(client, subscription.creatorId, subscription.token, subscription.amount);
+      await applyDonationToGoals(client, subscription.creatorId, subscription.token, toAmount(subscription.amount));
     });
     executorHealth.recordCharge(subscription.id, "success");
 

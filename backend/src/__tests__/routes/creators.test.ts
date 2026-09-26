@@ -15,6 +15,7 @@ jest.mock("../../prisma", () => ({
 }));
 
 import request from "supertest";
+import { Prisma } from "@prisma/client";
 import app from "../../app";
 import prisma from "../../prisma";
 import { generateToken } from "../../middleware/auth";
@@ -342,6 +343,21 @@ describe("GET /api/creators/leaderboard (#16)", () => {
     // file touches — but clearing between tests keeps that independence
     // explicit instead of implicit.
     leaderboardCache.clear();
+  });
+
+  it("returns exact totals from Decimal sums (0.1 + 0.2 must be 0.3, not 0.30000000000000004)", async () => {
+    expect(0.1 + 0.2).not.toBe(0.3); // the float behaviour this guards against
+    mockedPrisma.donation.groupBy.mockResolvedValue([
+      { creatorId: 1, _sum: { amount: new Prisma.Decimal("0.1").plus("0.2") }, _count: { _all: 2 } },
+    ]);
+    mockedPrisma.creator.findMany.mockResolvedValue([
+      { id: 1, username: "alice", displayName: "Alice", avatarUrl: null },
+    ]);
+
+    const res = await request(app).get("/api/creators/leaderboard?currency=DEC");
+
+    expect(res.status).toBe(200);
+    expect(res.body.items[0].total).toBe(0.3);
   });
 
   it("ranks top creators by total received, defaulting to XLM", async () => {
