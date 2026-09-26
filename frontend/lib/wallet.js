@@ -57,10 +57,18 @@ const connectWallet = async () => {
   }
   ensureInit();
   try {
-    const { address } = await StellarWalletsKit.authModal();
-    return address;
+    const res = await StellarWalletsKit.authModal();
+    return res?.address || null;
   } catch (err) {
-    throw toWalletError(err);
+    if (
+      err?.message?.toLowerCase().includes('closed') ||
+      err?.message?.toLowerCase().includes('rejected') ||
+      err?.message?.toLowerCase().includes('canceled') ||
+      err?.message?.toLowerCase().includes('cancelled')
+    ) {
+      return null;
+    }
+    throw err;
   }
 };
 

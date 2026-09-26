@@ -3,6 +3,7 @@
 import { ReactNode, useState } from 'react';
 import { useAuth } from '@/context/AuthContext';
 import { TipJarLoader } from '@/components/TipJarLoader';
+import { ThemeToggle } from '@/components/ThemeToggle';
 import { WalletConnectError, WalletConnectErrorData } from '@/components/WalletConnectError';
 import { categorizeWalletError } from '@/lib/walletErrors';
 
@@ -27,7 +28,7 @@ export function ProtectedRoute({ children }: { children: ReactNode }) {
         const error = categorizeWalletError(err);
         setWalletError(error);
         // Check if error message indicates session/token issues
-        const errorMessage = error.rawMessage || error.message || '';
+        const errorMessage = ('rawMessage' in error && error.rawMessage) || error.message || '';
         if (errorMessage.toLowerCase().includes('session') || 
             errorMessage.toLowerCase().includes('token') ||
             errorMessage.toLowerCase().includes('expired') ||
@@ -41,6 +42,9 @@ export function ProtectedRoute({ children }: { children: ReactNode }) {
 
     return (
       <div className="min-h-screen bg-background flex items-center justify-center px-4">
+        <div className="absolute top-4 right-4">
+          <ThemeToggle />
+        </div>
         <div className="card-brutal p-8 max-w-md w-full text-center">
           <h1 className="text-2xl font-extrabold text-ink mb-2">
             {sessionExpired ? 'Session Expired' : 'Connect Your Wallet'}

@@ -217,7 +217,12 @@ export default function AppHubPage() {
           </div>
 
           {/* Profile link + share */}
-          {creator && (
+          {loading ? (
+            <div className="card-brutal p-6 mb-8">
+              <Skeleton className="h-4 w-24 mb-2" />
+              <Skeleton className="h-5 w-64" />
+            </div>
+          ) : creator ? (
             <div className="card-brutal p-6 mb-8">
               <div className="flex flex-col sm:flex-row sm:items-center gap-4">
                 <div className="min-w-0 flex-1">
@@ -249,7 +254,7 @@ export default function AppHubPage() {
                 </div>
               </div>
             </div>
-          )}
+          ) : null}
 
           {/* Cash out */}
           <div className="card-brutal p-6">

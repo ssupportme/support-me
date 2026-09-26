@@ -21,13 +21,13 @@ const GAP_MS = 900;
 function Coin({ x, y, r, size = 20 }: { x: number; y: number; r: number; size?: number }) {
   return (
     <g transform={`translate(${x} ${y}) rotate(${r})`}>
-      <circle r={size} fill="#ffd84d" stroke="#0a0a0a" strokeWidth="3" />
+      <circle r={size} fill="#ffd84d" stroke="var(--ink)" strokeWidth="3" />
       <text
         textAnchor="middle"
         dominantBaseline="central"
         fontSize={size * 1.1}
         fontWeight="800"
-        fill="#0a0a0a"
+        fill="var(--ink)"
       >
         ★
       </text>
@@ -80,7 +80,7 @@ export function TipJar({ widthClass = 'w-[260px] sm:w-[320px]' }: { widthClass?:
           width="320"
           height="400"
           viewBox="0 0 200 300"
-          className={`${widthClass} h-auto overflow-visible drop-shadow-[6px_6px_0_rgba(10,10,10,1)]`}
+          className={`${widthClass} h-auto overflow-visible drop-shadow-[6px_6px_0_var(--shadow-color)]`}
         >
           {/* Hand dropping a coin (simple mitten shape holding a coin). The
               outer group carries the release animation; the inner group scales
@@ -91,7 +91,7 @@ export function TipJar({ widthClass = 'w-[260px] sm:w-[320px]' }: { widthClass?:
               <path
                 d="M64 40 q-16 6 -16 24 q0 16 20 18 l52 0 q10 -2 10 -14 l0 -6 q10 0 10 -10 q0 -10 -12 -10 l-40 0 q-8 0 -16 6 z"
                 fill="#ff9db1"
-                stroke="#0a0a0a"
+                stroke="var(--ink)"
                 strokeWidth="2.4"
                 strokeLinejoin="round"
                 transform="translate(0 26)"
@@ -102,19 +102,19 @@ export function TipJar({ widthClass = 'w-[260px] sm:w-[320px]' }: { widthClass?:
           {/* Jar body */}
           <g>
             {/* Jar rim / lip */}
-            <rect x="48" y="150" width="104" height="20" rx="6" fill="#6fd3ff" stroke="#0a0a0a" strokeWidth="4" />
+            <rect x="48" y="150" width="104" height="20" rx="6" fill="#6fd3ff" stroke="var(--ink)" strokeWidth="4" />
             {/* Jar glass */}
             <path
               d="M54 168 q-8 0 -8 12 l0 78 q0 16 16 16 l76 0 q16 0 16 -16 l0 -78 q0 -12 -8 -12 z"
               fill="#c4b5fd"
               fillOpacity="0.35"
-              stroke="#0a0a0a"
+              stroke="var(--ink)"
               strokeWidth="4"
               strokeLinejoin="round"
             />
             {/* "TIPS" label band */}
-            <rect x="66" y="188" width="68" height="26" rx="4" fill="#fdfcf7" stroke="#0a0a0a" strokeWidth="3" />
-            <text x="100" y="201" textAnchor="middle" dominantBaseline="central" fontSize="15" fontWeight="800" fill="#0a0a0a">
+            <rect x="66" y="188" width="68" height="26" rx="4" fill="var(--card)" stroke="var(--ink)" strokeWidth="3" />
+            <text x="100" y="201" textAnchor="middle" dominantBaseline="central" fontSize="15" fontWeight="800" fill="var(--ink)">
               TIPS
             </text>
 
