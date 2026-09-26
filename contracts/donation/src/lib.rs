@@ -24,7 +24,7 @@
 use common::{AdminAction, AdminProposal, CreatorProfile, DonationRecord, Subscription};
 use soroban_sdk::{
     contract, contractevent, contractimpl, symbol_short, token, Address, Env, IntoVal, String,
-    Symbol, Val, Vec as SorobanVec,
+    Symbol, Val, Vec,
 };
 
 const DONATIONS_KEY: Symbol = symbol_short!("donations");
@@ -116,6 +116,15 @@ pub struct ProposalExecutedEvent {
     pub executor: Address,
 }
 
+#[contractevent(topics = ["goal_upd"])]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct GoalUpdatedEvent {
+    #[topic]
+    pub creator: Address,
+    pub goal_amount: i128,
+    pub updated_at: u64,
+}
+
 #[contract]
 pub struct DonationContract;
 
@@ -129,7 +138,7 @@ impl DonationContract {
             "donation contract already initialized"
         );
 
-        let mut admins = SorobanVec::new(&env);
+        let mut admins = Vec::new(&env);
         admins.push_back(admin.clone());
 
         env.storage().instance().set(&ADMIN_KEY, &admin);
@@ -143,7 +152,7 @@ impl DonationContract {
     /// One-time multi-sig setup: configures admin list, threshold, and timelock delay.
     pub fn initialize_multisig(
         env: Env,
-        admins: SorobanVec<Address>,
+        admins: Vec<Address>,
         threshold: u32,
         timelock_delay: u64,
         registry: Address,
@@ -170,11 +179,11 @@ impl DonationContract {
 
     /// Returns whether a given address is an authorized contract admin.
     pub fn is_admin(env: Env, address: Address) -> bool {
-        let admins: SorobanVec<Address> = env
+        let admins: Vec<Address> = env
             .storage()
             .instance()
             .get(&ADMINS_KEY)
-            .unwrap_or_else(|| SorobanVec::new(&env));
+            .unwrap_or_else(|| Vec::new(&env));
         Self::contains_address(&admins, &address)
     }
 
@@ -284,15 +293,15 @@ impl DonationContract {
                 env.storage().instance().set(&REGISTRY_KEY, &target);
             }
             AdminAction::AddAdmin(new_admin) => {
-                let mut admins: SorobanVec<Address> = env.storage().instance().get(&ADMINS_KEY).unwrap();
+                let mut admins: Vec<Address> = env.storage().instance().get(&ADMINS_KEY).unwrap();
                 if !Self::contains_address(&admins, &new_admin) {
                     admins.push_back(new_admin);
                     env.storage().instance().set(&ADMINS_KEY, &admins);
                 }
             }
             AdminAction::RemoveAdmin(old_admin) => {
-                let admins: SorobanVec<Address> = env.storage().instance().get(&ADMINS_KEY).unwrap();
-                let mut new_admins = SorobanVec::new(&env);
+                let admins: Vec<Address> = env.storage().instance().get(&ADMINS_KEY).unwrap();
+                let mut new_admins = Vec::new(&env);
                 for i in 0..admins.len() {
                     let a = admins.get(i).unwrap();
                     if a != old_admin {
@@ -305,7 +314,7 @@ impl DonationContract {
                 env.storage().instance().set(&ADMINS_KEY, &new_admins);
             }
             AdminAction::SetThreshold(new_threshold) => {
-                let admins: SorobanVec<Address> = env.storage().instance().get(&ADMINS_KEY).unwrap();
+                let admins: Vec<Address> = env.storage().instance().get(&ADMINS_KEY).unwrap();
                 assert!(
                     new_threshold > 0 && new_threshold <= admins.len(),
                     "invalid new threshold"
@@ -350,14 +359,14 @@ impl DonationContract {
     pub fn register_creator(env: Env, creator: Address, username: String) -> CreatorProfile {
         assert!(!Self::is_paused(env.clone()), "contract is currently paused");
         let registry = Self::registry_address(&env);
-        let args: SorobanVec<Val> = (creator, username).into_val(&env);
+        let args: Vec<Val> = (creator, username).into_val(&env);
         env.invoke_contract(&registry, &Symbol::new(&env, "register_creator"), args)
     }
 
     /// Cross-contract call: reads a creator's profile from CreatorRegistry.
     pub fn get_creator(env: Env, creator: Address) -> Option<CreatorProfile> {
         let registry = Self::registry_address(&env);
-        let args: SorobanVec<Val> = (creator,).into_val(&env);
+        let args: Vec<Val> = (creator,).into_val(&env);
         env.invoke_contract(&registry, &Symbol::new(&env, "get_creator"), args)
     }
 
@@ -420,7 +429,7 @@ impl DonationContract {
         token_client.transfer(&donor, &creator, &amount);
 
         let registry = Self::registry_address(&env);
-        let record_args: SorobanVec<Val> =
+        let record_args: Vec<Val> =
             (env.current_contract_address(), creator.clone(), amount).into_val(&env);
         let (): () = env.invoke_contract(&registry, &Symbol::new(&env, "record_donation"), record_args);
 
@@ -542,7 +551,7 @@ impl DonationContract {
         );
 
         let registry = Self::registry_address(&env);
-        let record_args: SorobanVec<Val> = (
+        let record_args: Vec<Val> = (
             env.current_contract_address(),
             subscription.creator.clone(),
             subscription.amount,
@@ -632,7 +641,7 @@ impl DonationContract {
     pub fn set_goal(env: Env, creator: Address, goal_amount: i128) {
         creator.require_auth();
         let registry = Self::registry_address(&env);
-        let args: SorobanVec<Val> = (creator.clone(), goal_amount).into_val(&env);
+        let args: Vec<Val> = (creator.clone(), goal_amount).into_val(&env);
         let (): () = env.invoke_contract(&registry, &Symbol::new(&env, "set_goal"), args);
 
         GoalUpdatedEvent {
@@ -646,7 +655,7 @@ impl DonationContract {
     /// Cross-contract call: reads a creator's funding goal from CreatorRegistry.
     pub fn get_goal(env: Env, creator: Address) -> Option<i128> {
         let registry = Self::registry_address(&env);
-        let args: SorobanVec<Val> = (creator,).into_val(&env);
+        let args: Vec<Val> = (creator,).into_val(&env);
         env.invoke_contract(&registry, &Symbol::new(&env, "get_goal"), args)
     }
 
@@ -691,7 +700,7 @@ impl DonationContract {
             .expect("donation contract not initialized: call initialize() first")
     }
 
-    fn contains_address(vec: &SorobanVec<Address>, target: &Address) -> bool {
+    fn contains_address(vec: &Vec<Address>, target: &Address) -> bool {
         for i in 0..vec.len() {
             if vec.get(i).unwrap() == *target {
                 return true;
@@ -752,7 +761,7 @@ mod tests {
         let admin3 = Address::generate(&env);
         let executor = Address::generate(&env);
 
-        let mut admins = SorobanVec::new(&env);
+        let mut admins = Vec::new(&env);
         admins.push_back(admin1.clone());
         admins.push_back(admin2.clone());
         admins.push_back(admin3.clone());
