@@ -429,6 +429,14 @@ impl DonationContract {
     }
 
     /// Get all donations count (approximate, stored in counter)
+    /// 
+    /// NOTE ON STORAGE GROWTH & TTL: The donations log is an append-only structure.
+    /// It grows indefinitely, which means state rent accumulates over time.
+    /// To avoid unbounded rent costs for the contract, we do not explicitly extend
+    /// the TTL of old donation records. If old records expire due to un-extended 
+    /// TTLs, this function's counter remains valid, but `get_donation` may fail 
+    /// to find them. This is an accepted tradeoff since the emitted `DonatedEvent`s 
+    /// (indexed off-chain) are the canonical long-term record.
     pub fn get_total_donations_count(env: Env) -> u32 {
         env.storage()
             .persistent()
