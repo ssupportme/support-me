@@ -20,7 +20,10 @@ type EarningsByCurrency = Record<string, number>;
 
 router.get(
   "/overview",
+  validate({ query: listAdminAuditQuerySchema }),
   asyncHandler(async (req: AuthRequest, res) => {
+    const { page, limit } = req.query as unknown as { page: number; limit: number };
+
     // Run the independent aggregates concurrently.
     const [totalSignups, totalCreators, totalByCurrency, perCreatorByCurrency, users] =
       await Promise.all([
@@ -43,6 +46,8 @@ router.get(
         prisma.user.findMany({
           orderBy: { createdAt: "desc" },
           include: { creator: true },
+          skip: (page - 1) * limit,
+          take: limit,
         }),
       ]);
 
@@ -82,6 +87,12 @@ router.get(
       totalCreators,
       earningsByCurrency,
       users: userRows,
+      pagination: {
+        page,
+        limit,
+        total: totalSignups,
+        totalPages: Math.ceil(totalSignups / limit),
+      },
     });
   })
 );
