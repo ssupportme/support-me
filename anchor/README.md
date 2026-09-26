@@ -74,6 +74,40 @@ The frontend discovers the USDC issuer from this anchor's TOML
 > options). If the frontend can't fetch the TOML, that's the cause — see the
 > "allowHttp" handling in `lib/anchor.js`.
 
+## Required environment
+
+| Where | What | Notes |
+|-------|------|-------|
+| Tools | Docker + Compose, `stellar` CLI, Node.js | checked by `setup.sh`, which exits with an install hint if one is missing |
+| Keys | `ap-sep10-account`, `ap-distribution-account`, `ap-usdc-issuer` | created and funded on testnet by `setup.sh` in your Stellar CLI keystore; re-runs reuse them |
+| Frontend | `NEXT_PUBLIC_ANCHOR_HOME_DOMAIN=localhost:8080` | which anchor the frontend talks to |
+| Frontend | `NEXT_PUBLIC_ANCHOR_ASSET_CODE=USDC` | asset the anchor serves |
+
+Ports used on your machine: `8080` (SEP server), `8085` (platform API), `8091`
+(reference server), `3001` (SEP-24 interactive UI).
+
+## Complete a SEP-24 withdrawal locally
+
+1. Start the anchor: `cd anchor && ./setup.sh`. Note the **USDC issuer** it prints.
+2. Put the two `NEXT_PUBLIC_ANCHOR_*` values above in `frontend/.env.local`, then
+   start the backend and frontend as described in the root README.
+3. Use a testnet wallet that has a trustline to that USDC issuer and holds some
+   of the local USDC (for example by running a SEP-24 *deposit* through this
+   same anchor first).
+4. Sign in as a creator and open the cash-out flow from `/settings`.
+5. Approve the SEP-10 sign-in in your wallet. The frontend then opens the
+   anchor's interactive form (served on `http://localhost:3001`) in a popup or
+   tab; allow it if your browser blocks it.
+6. Fill in the KYC/bank form the reference server shows and submit.
+7. Approve the on-chain USDC transfer to the anchor when your wallet asks. The
+   frontend polls the anchor and shows the withdrawal moving to completed.
+
+If the frontend can't read the anchor's TOML, see the HTTP note above.
+
+> **Dev only.** This anchor exists so contributors can test cash-out locally.
+> It uses throwaway keys and its own USDC, has no real fiat rails, and must
+> never be deployed or pointed at production.
+
 ## Files
 
 | File | Purpose |
