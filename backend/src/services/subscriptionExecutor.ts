@@ -99,9 +99,11 @@ export class SubscriptionExecutor {
 
       log("info", "SubscriptionExecutor tick started", { dueCount: due.length });
 
-      for (const subscription of due) {
-        // One subscription's unexpected error (e.g. a DB write failing after
-        // the on-chain charge settled) must not skip the rest of this pass.
+      // Use a bounded concurrency (e.g., 5) to process charges concurrently
+      // without overloading the RPC or database.
+      const CONCURRENCY_LIMIT = 5;
+      
+      const processSubscription = async (subscription: Subscription) => {
         try {
           await this.charge(subscription);
         } catch (error) {
@@ -115,7 +117,17 @@ export class SubscriptionExecutor {
             error: errorMessage,
           });
         }
+      };
+
+      const chunks = [];
+      for (let i = 0; i < due.length; i += CONCURRENCY_LIMIT) {
+        chunks.push(due.slice(i, i + CONCURRENCY_LIMIT));
       }
+
+      for (const chunk of chunks) {
+        await Promise.all(chunk.map(processSubscription));
+      }
+
       ok = true;
     } catch (error) {
       runError = (error as Error).message;
