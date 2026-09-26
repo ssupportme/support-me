@@ -157,6 +157,10 @@ impl DonationContract {
             memo.len() <= MAX_MEMO_LENGTH,
             "Donation memo exceeds maximum length"
         );
+        assert!(
+            Self::is_token_allowed(env.clone(), token.clone()),
+            "Token is not in the allowlist"
+        );
 
         // Move the funds from donor to creator via the token contract (e.g. native XLM SAC)
         let token_client = token::Client::new(&env, &token);
