@@ -504,6 +504,7 @@ mod tests {
         env.ledger().with_mut(|li| li.sequence_number = 100);
 
         let token_address = create_token_contract(&env, &admin);
+        donation_client.add_allowed_token(&token_address);
         StellarAssetClient::new(&env, &token_address).mint(&donor, &10_000);
 
         donation_client.register_creator(&creator, &String::from_bytes(&env, b"awesome_dev"));
@@ -548,6 +549,7 @@ mod tests {
         let creator = Address::generate(&env);
 
         let token_address = create_token_contract(&env, &admin);
+        donation_client.add_allowed_token(&token_address);
         StellarAssetClient::new(&env, &token_address).mint(&donor, &5_000);
 
         donation_client.donate(
@@ -573,6 +575,7 @@ mod tests {
         let donor = Address::generate(&env);
         let creator = Address::generate(&env);
         let token_address = create_token_contract(&env, &admin);
+        donation_client.add_allowed_token(&token_address);
         StellarAssetClient::new(&env, &token_address).mint(&donor, &1_000);
 
         donation_client.donate(
@@ -594,6 +597,7 @@ mod tests {
         let donor = Address::generate(&env);
         let creator = Address::generate(&env);
         let token_address = create_token_contract(&env, &admin);
+        donation_client.add_allowed_token(&token_address);
         StellarAssetClient::new(&env, &token_address).mint(&donor, &10);
 
         donation_client.donate(
@@ -615,6 +619,7 @@ mod tests {
         let donor = Address::generate(&env);
         let creator = Address::generate(&env);
         let token_address = create_token_contract(&env, &admin);
+        donation_client.add_allowed_token(&token_address);
         StellarAssetClient::new(&env, &token_address).mint(&donor, &1_000);
         let oversized_memo = [b'x'; MAX_MEMO_LENGTH as usize + 1];
 
@@ -636,6 +641,7 @@ mod tests {
         let donor = Address::generate(&env);
         let creator = Address::generate(&env);
         let token_address = create_token_contract(&env, &admin);
+        donation_client.add_allowed_token(&token_address);
         StellarAssetClient::new(&env, &token_address).mint(&donor, &10_000);
 
         donation_client.donate(&donor, &creator, &token_address, &100, &String::from_bytes(&env, b"one"));
@@ -655,6 +661,7 @@ mod tests {
         let supporter = Address::generate(&env);
         let creator = Address::generate(&env);
         let token_address = create_token_contract(&env, &admin);
+        donation_client.add_allowed_token(&token_address);
 
         env.ledger().with_mut(|li| li.timestamp = 1_000);
 
@@ -679,6 +686,7 @@ mod tests {
         let creator = Address::generate(&env);
         let executor = Address::generate(&env);
         let token_address = create_token_contract(&env, &admin);
+        donation_client.add_allowed_token(&token_address);
         StellarAssetClient::new(&env, &token_address).mint(&supporter, &10_000);
 
         env.ledger().with_mut(|li| li.timestamp = 1_000);
@@ -717,6 +725,7 @@ mod tests {
         let executor = Address::generate(&env);
         let impostor = Address::generate(&env);
         let token_address = create_token_contract(&env, &admin);
+        donation_client.add_allowed_token(&token_address);
 
         donation_client.set_executor(&executor);
         let id = donation_client.subscribe(&supporter, &creator, &token_address, &500, &1_000);
@@ -735,6 +744,7 @@ mod tests {
         let creator = Address::generate(&env);
         let executor = Address::generate(&env);
         let token_address = create_token_contract(&env, &admin);
+        donation_client.add_allowed_token(&token_address);
         StellarAssetClient::new(&env, &token_address).mint(&supporter, &10_000);
 
         env.ledger().with_mut(|li| li.timestamp = 1_000);
@@ -757,6 +767,7 @@ mod tests {
         let supporter = Address::generate(&env);
         let creator = Address::generate(&env);
         let token_address = create_token_contract(&env, &admin);
+        donation_client.add_allowed_token(&token_address);
 
         env.ledger().with_mut(|li| li.timestamp = 1_000);
         let id = donation_client.subscribe(&supporter, &creator, &token_address, &500, &1_000);
@@ -782,6 +793,7 @@ mod tests {
         let creator = Address::generate(&env);
         let executor = Address::generate(&env);
         let token_address = create_token_contract(&env, &admin);
+        donation_client.add_allowed_token(&token_address);
         StellarAssetClient::new(&env, &token_address).mint(&supporter, &10_000);
 
         env.ledger().with_mut(|li| li.timestamp = 1_000);
@@ -808,5 +820,44 @@ mod tests {
 
         donation_client.set_goal(&creator, &2500);
         assert_eq!(donation_client.get_goal(&creator), Some(2500));
+    }
+
+    #[test]
+    #[should_panic(expected = "Token is not in the allowlist")]
+    fn test_donate_rejects_unallowed_token() {
+        let env = Env::default();
+        env.mock_all_auths_allowing_non_root_auth();
+        let (admin, donation_client, _registry_client) = setup(&env);
+
+        let donor = Address::generate(&env);
+        let creator = Address::generate(&env);
+        
+        let token_address = env.register_stellar_asset_contract_v2(admin).address();
+        StellarAssetClient::new(&env, &token_address).mint(&donor, &1_000);
+
+        donation_client.donate(
+            &donor,
+            &creator,
+            &token_address,
+            &100,
+            &String::from_bytes(&env, b"should fail"),
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "Token is not in the allowlist")]
+    fn test_subscribe_rejects_unallowed_token() {
+        let env = Env::default();
+        env.mock_all_auths_allowing_non_root_auth();
+        let (admin, donation_client, _registry_client) = setup(&env);
+
+        let supporter = Address::generate(&env);
+        let creator = Address::generate(&env);
+        
+        let token_address = env.register_stellar_asset_contract_v2(admin).address();
+
+        env.ledger().with_mut(|li| li.timestamp = 1_000);
+
+        donation_client.subscribe(&supporter, &creator, &token_address, &100, &2_592_000);
     }
 }
