@@ -243,6 +243,10 @@ impl DonationContract {
         supporter.require_auth();
         assert!(amount > 0, "Subscription amount must be positive");
         assert!(interval_secs > 0, "Interval must be positive");
+        assert!(
+            Self::is_token_allowed(env.clone(), token.clone()),
+            "Token is not in the allowlist"
+        );
 
         let id: u64 = env.storage().persistent().get(&SUB_COUNTER).unwrap_or(0);
         let now = env.ledger().timestamp();
