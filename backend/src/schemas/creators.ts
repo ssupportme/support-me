@@ -55,4 +55,9 @@ export const updateCreatorSchema = z.object({
   // POST /api/goals/:username instead. null clears a previously-set goal; a
   // positive integer sets it.
   donationGoal: z.number().int().positive().nullable().optional(),
+  // Quick-select amounts for the donate page's preset buttons (#120).
+  // Capped at 6 so the row of buttons stays usable on a small screen; an
+  // empty array explicitly clears a creator's customization, falling back
+  // to the frontend's hardcoded defaults.
+  presetAmounts: z.array(z.number().positive()).max(6).optional(),
 });

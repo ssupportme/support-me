@@ -105,6 +105,14 @@ model Creator {
   // change alone — the migration copies each non-null value into a new Goal
   // row before the column stops being read by the API.
   donationGoal  Int?
+  // Optional quick-select amounts a creator can configure for the donate
+  // page's preset buttons (#120), e.g. [1, 5, 10, 25]. Nullable/empty means
+  // the creator hasn't customized these — the frontend falls back to
+  // hardcoded defaults rather than the API making up a default list, so an
+  // empty array and "never configured" stay distinguishable if that
+  // matters later. Denominated in whatever asset the supporter picks on
+  // the donate page, same as Goal.currency — not tied to a single currency.
+  presetAmounts Float[]        @default([])
   createdAt     DateTime       @default(now())
   updatedAt     DateTime       @updatedAt
   donations     Donation[]

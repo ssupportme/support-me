@@ -51,7 +51,14 @@ interface Creator {
   acceptsUsdc: boolean;
   acceptsUsdt: boolean;
   donationGoal: number | null;
+  // Creator-configured quick-select donate amounts (#120), set from
+  // Settings. Absent/empty means the creator hasn't customized these.
+  presetAmounts?: number[] | null;
 }
+
+// Fallback quick-select amounts shown on the donate page when a creator
+// hasn't configured their own presets from Settings.
+const DEFAULT_DONATION_PRESETS = ['1', '5', '10', '20'];
 
 interface Goal {
   id: number;
@@ -88,7 +95,12 @@ export default function CreatorProfileClient({ params }: { params: Promise<{ use
 
   const intervalDays = intervalChoice === 'custom' ? customDays : intervalChoice;
 
-  const presets = ['1', '5', '10', '20'];
+  // Use the creator's own presets when they've set any (#120), otherwise
+  // fall back to sensible defaults.
+  const presets =
+    creator?.presetAmounts && creator.presetAmounts.length > 0
+      ? creator.presetAmounts.map((amount) => String(amount))
+      : DEFAULT_DONATION_PRESETS;
 
   // Only offer assets the creator actually accepts, intersected with what this
   // deployment supports (USDC/USDT only appear when their issuer is configured).

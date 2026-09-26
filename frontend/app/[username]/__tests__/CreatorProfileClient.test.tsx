@@ -222,4 +222,48 @@ describe('CreatorProfileClient', () => {
     await waitFor(() => expect(screen.getByRole('button', { name: 'XLM' })).toBeInTheDocument());
     expect(screen.queryByRole('button', { name: 'USDT' })).not.toBeInTheDocument();
   });
+
+  // Issue #120: quick-select preset amount buttons on the donate page.
+  it('falls back to default preset amounts when the creator has not configured any', async () => {
+    mockFetchSequence({
+      '/api/creators/alice': { ...baseCreator, presetAmounts: [] },
+      '/api/goals/alice': { items: [] },
+    });
+
+    await renderProfile('alice');
+    await waitFor(() => expect(screen.getByText('Alice')).toBeInTheDocument());
+
+    for (const preset of ['1', '5', '10', '20']) {
+      expect(screen.getByRole('button', { name: preset })).toBeInTheDocument();
+    }
+  });
+
+  it("shows the creator's custom preset amounts instead of the defaults", async () => {
+    mockFetchSequence({
+      '/api/creators/alice': { ...baseCreator, presetAmounts: [2, 15, 50] },
+      '/api/goals/alice': { items: [] },
+    });
+
+    await renderProfile('alice');
+    await waitFor(() => expect(screen.getByText('Alice')).toBeInTheDocument());
+
+    for (const preset of ['2', '15', '50']) {
+      expect(screen.getByRole('button', { name: preset })).toBeInTheDocument();
+    }
+    expect(screen.queryByRole('button', { name: '20' })).not.toBeInTheDocument();
+  });
+
+  it('clicking a preset amount populates the donation amount input', async () => {
+    mockFetchSequence({
+      '/api/creators/alice': { ...baseCreator, presetAmounts: [2, 15, 50] },
+      '/api/goals/alice': { items: [] },
+    });
+
+    await renderProfile('alice');
+    await waitFor(() => expect(screen.getByText('Alice')).toBeInTheDocument());
+
+    await userEvent.click(screen.getByRole('button', { name: '15' }));
+
+    expect(screen.getByLabelText(/amount/i)).toHaveValue(15);
+  });
 });
