@@ -129,3 +129,109 @@ describe("Soroban RPC failover", () => {
     expect(operation).toHaveBeenCalledTimes(2);
   });
 });
+
+describe("Soroban RPC retry with backoff (#27)", () => {
+  const originalUrls = process.env.SOROBAN_RPC_URLS;
+  const originalFetch = global.fetch;
+
+  beforeEach(() => {
+    resetSorobanRpcFailoverState();
+    process.env.SOROBAN_RPC_URLS = "https://primary.example/rpc";
+    jest.spyOn(console, "info").mockImplementation(() => undefined);
+    jest.spyOn(console, "warn").mockImplementation(() => undefined);
+  });
+
+  afterAll(() => {
+    global.fetch = originalFetch;
+    if (originalUrls === undefined) delete process.env.SOROBAN_RPC_URLS;
+    else process.env.SOROBAN_RPC_URLS = originalUrls;
+    jest.restoreAllMocks();
+  });
+
+  it("recovers from a transient RPC failure without surfacing an error", async () => {
+    global.fetch = jest
+      .fn()
+      .mockResolvedValueOnce({ ok: false, status: 503, statusText: "Service Unavailable" })
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ result: { sequence: 7 } }) }) as unknown as typeof fetch;
+
+    await expect(callSorobanRpc<{ sequence: number }>("getLatestLedger", {})).resolves.toEqual({
+      sequence: 7,
+    });
+    expect(global.fetch).toHaveBeenCalledTimes(2);
+  });
+
+  it("recovers from a dropped connection", async () => {
+    global.fetch = jest
+      .fn()
+      .mockRejectedValueOnce(new Error("read ECONNRESET"))
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ result: { sequence: 8 } }) }) as unknown as typeof fetch;
+
+    await expect(callSorobanRpc<{ sequence: number }>("getLatestLedger", {})).resolves.toEqual({
+      sequence: 8,
+    });
+  });
+
+  it("does not retry a contract revert, failing on the first attempt", async () => {
+    global.fetch = jest.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ error: { message: "HostError: Error(Contract, #42)", code: -32000 } }),
+    }) as unknown as typeof fetch;
+
+    await expect(callSorobanRpc("sendTransaction", {})).rejects.toThrow(
+      "failed on all configured endpoints"
+    );
+    // One endpoint, one attempt: a revert is a final answer from the chain.
+    expect(global.fetch).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not retry an invalid-params JSON-RPC error", async () => {
+    global.fetch = jest.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ error: { message: "invalid params", code: -32602 } }),
+    }) as unknown as typeof fetch;
+
+    await expect(callSorobanRpc("sendTransaction", {})).rejects.toThrow(
+      "failed on all configured endpoints"
+    );
+    expect(global.fetch).toHaveBeenCalledTimes(1);
+  });
+
+  it("gives up after exhausting its retries on a persistent outage", async () => {
+    global.fetch = jest
+      .fn()
+      .mockResolvedValue({ ok: false, status: 503, statusText: "Service Unavailable" }) as unknown as typeof fetch;
+
+    await expect(
+      callSorobanRpc("getLatestLedger", {}, { retries: 2, retryBaseDelayMs: 1 })
+    ).rejects.toThrow("failed on all configured endpoints");
+    // 1 initial attempt + 2 retries, each against the single endpoint.
+    expect(global.fetch).toHaveBeenCalledTimes(3);
+  });
+
+  it("retries SDK operations after a transient failure", async () => {
+    process.env.SOROBAN_RPC_URLS = "https://primary.example/rpc";
+    const getHealth = jest
+      .spyOn(rpc.Server.prototype, "getHealth")
+      .mockRejectedValueOnce(new Error("HTTP 503 Service Unavailable"))
+      .mockResolvedValue({ status: "healthy" } as never);
+
+    await expect(
+      withSorobanRpcServer("sdkHealth", (server) => server.getHealth(), {
+        totalTimeoutMs: 500,
+      })
+    ).resolves.toEqual({ status: "healthy" });
+    expect(getHealth).toHaveBeenCalledTimes(2);
+  });
+
+  it("makes exactly one attempt against the SDK for a permanent error", async () => {
+    process.env.SOROBAN_RPC_URLS = "https://primary.example/rpc";
+    const sendTransaction = jest
+      .spyOn(rpc.Server.prototype, "sendTransaction")
+      .mockRejectedValue(new Error("HostError: Error(Contract, #7)"));
+
+    await expect(
+      withSorobanRpcServer("sendTransaction", (server) => server.sendTransaction({} as never))
+    ).rejects.toThrow("failed on all configured endpoints");
+    expect(sendTransaction).toHaveBeenCalledTimes(1);
+  });
+});

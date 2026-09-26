@@ -1,6 +1,7 @@
 import * as StellarSdk from '@stellar/stellar-sdk';
 import { signTransaction as signWithWallet } from './wallet';
 import { sacContractId } from './assets';
+import { reportRetry, withRetry } from './retry';
 
 const RPC_URL =
   process.env.NEXT_PUBLIC_SOROBAN_RPC_URL || 'https://soroban-testnet.stellar.org';
@@ -21,6 +22,12 @@ export const MAX_CHARGE_INTERVAL_DAYS = Math.floor(
 );
 
 const server = new StellarSdk.rpc.Server(RPC_URL);
+
+// How long to keep polling for a submitted transaction to be included in a
+// ledger. Soroban targets a ~5s ledger close, so this allows several misses
+// before giving up.
+const CONFIRMATION_WINDOW_MS = 30_000;
+const CONFIRMATION_POLL_MS = 1_500;
 
 // Error types the UI can distinguish between:
 // - 'wallet'     wallet not connected / user rejected or failed to sign
@@ -135,7 +142,13 @@ async function callContract({ contractId = CONTRACT_ID, method, args, signerAddr
 
   let sendResponse;
   try {
-    sendResponse = await server.sendTransaction(signedTx);
+    // Retried on transient failures only. Re-submitting is safe here: the
+    // transaction is already signed and has a fixed hash, so a retry is a
+    // no-op on any node that accepted the first attempt, and a genuine
+    // recovery on a node that dropped it. A contract revert is not retried.
+    sendResponse = await withRetry('sendTransaction', () => server.sendTransaction(signedTx), {
+      onRetry: reportRetry,
+    });
   } catch (err) {
     throw new DonationError('network', 'Failed to submit the transaction to the network.', err);
   }
@@ -147,11 +160,14 @@ async function callContract({ contractId = CONTRACT_ID, method, args, signerAddr
   onStatus?.('pending');
 
   const hash = sendResponse.hash;
-  let getResponse = await server.getTransaction(hash);
+  const readTransaction = () =>
+    withRetry('getTransaction', () => server.getTransaction(hash), { onRetry: reportRetry });
+
+  let getResponse = await readTransaction();
   const start = Date.now();
-  while (getResponse.status === 'NOT_FOUND' && Date.now() - start < 30000) {
-    await new Promise((resolve) => setTimeout(resolve, 1500));
-    getResponse = await server.getTransaction(hash);
+  while (getResponse.status === 'NOT_FOUND' && Date.now() - start < CONFIRMATION_WINDOW_MS) {
+    await new Promise((resolve) => setTimeout(resolve, CONFIRMATION_POLL_MS));
+    getResponse = await readTransaction();
   }
 
   if (getResponse.status === 'SUCCESS') {
@@ -272,7 +288,9 @@ export async function approveAllowance({
 
   let latestLedger;
   try {
-    ({ sequence: latestLedger } = await server.getLatestLedger());
+    ({ sequence: latestLedger } = await withRetry('getLatestLedger', () => server.getLatestLedger(), {
+      onRetry: reportRetry,
+    }));
   } catch (err) {
     throw new DonationError('network', 'Could not read the current ledger from the network.', err);
   }

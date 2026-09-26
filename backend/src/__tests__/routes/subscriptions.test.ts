@@ -28,49 +28,75 @@ const mockedPrisma = prisma as unknown as {
   };
 };
 
+const SUPPORTER = "GBLOPB74SBZC2O24XTYSW4UOJ5LPQXUENXQK53RJUO5GYZIKTQ7OB365";
+const OTHER_SUPPORTER = "GA7D5LDGFABXNYEO6LZVMTWK5JWEPTODCLYZ7TG4XDZRKKXP6OS5K5JW";
+
 describe("GET /api/subscriptions", () => {
-  it("returns all subscriptions ordered by creation date", async () => {
+  // The route requires auth and scopes results to the caller, so these cases
+  // must present a token for the wallet whose subscriptions they expect.
+  const token = generateToken(1, SUPPORTER);
+  const auth = { Authorization: `Bearer ${token}` };
+
+  it("rejects requests without an auth token", async () => {
+    const res = await request(app).get("/api/subscriptions");
+
+    expect(res.status).toBe(401);
+    expect(mockedPrisma.subscription.findMany).not.toHaveBeenCalled();
+  });
+
+  it("returns the caller's own subscriptions ordered by creation date", async () => {
     const subscriptions = [
       {
         id: 1,
         creatorId: 1,
-        supporterAddress:
-          "GBLOPB74SBZC2O24XTYSW4UOJ5LPQXUENXQK53RJUO5GYZIKTQ7OB365",
+        supporterAddress: SUPPORTER,
       },
     ];
     mockedPrisma.subscription.findMany.mockResolvedValue(subscriptions);
 
-    const res = await request(app).get("/api/subscriptions");
+    const res = await request(app).get("/api/subscriptions").set(auth);
 
     expect(res.status).toBe(200);
     expect(res.body).toEqual(subscriptions);
+    // With no query params the caller's own wallet address is applied, so this
+    // can never return another supporter's rows.
     expect(mockedPrisma.subscription.findMany).toHaveBeenCalledWith({
       orderBy: { createdAt: "desc" },
-      where: {},
+      where: { supporterAddress: SUPPORTER },
       include: {
         creator: { select: { username: true, displayName: true, avatarUrl: true } },
       },
     });
   });
 
-  it("filters by supporterAddress when provided as a query param", async () => {
+  it("filters by supporterAddress when it matches the caller", async () => {
     mockedPrisma.subscription.findMany.mockResolvedValue([]);
 
-    await request(app).get("/api/subscriptions").query({
-      supporterAddress:
-        "GBLOPB74SBZC2O24XTYSW4UOJ5LPQXUENXQK53RJUO5GYZIKTQ7OB365",
-    });
+    await request(app)
+      .get("/api/subscriptions")
+      .set(auth)
+      .query({ supporterAddress: SUPPORTER });
 
     expect(mockedPrisma.subscription.findMany).toHaveBeenCalledWith({
       orderBy: { createdAt: "desc" },
       where: {
-        supporterAddress:
-          "GBLOPB74SBZC2O24XTYSW4UOJ5LPQXUENXQK53RJUO5GYZIKTQ7OB365",
+        supporterAddress: SUPPORTER,
       },
       include: {
         creator: { select: { username: true, displayName: true, avatarUrl: true } },
       },
     });
+  });
+
+  it("refuses to list another supporter's subscriptions", async () => {
+    const res = await request(app)
+      .get("/api/subscriptions")
+      .set(auth)
+      .query({ supporterAddress: OTHER_SUPPORTER });
+
+    expect(res.status).toBe(401);
+    expect(res.body.code).toBe("UNAUTHORIZED");
+    expect(mockedPrisma.subscription.findMany).not.toHaveBeenCalled();
   });
 });
 

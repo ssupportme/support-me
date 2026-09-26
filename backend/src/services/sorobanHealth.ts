@@ -12,7 +12,14 @@ export async function checkSorobanRpc(): Promise<{ status: "ok" | "down"; latenc
     const result = await callSorobanRpc<{ sequence: number }>(
       "getLatestLedger",
       {},
-      { timeoutMs: RPC_TIMEOUT_MS, totalTimeoutMs: RPC_TOTAL_TIMEOUT_MS }
+      {
+        timeoutMs: RPC_TIMEOUT_MS,
+        totalTimeoutMs: RPC_TOTAL_TIMEOUT_MS,
+        // A health probe answers "is the RPC reachable right now". Retrying
+        // would only make /health slower without making the app healthier,
+        // and would exceed the 3s budget above.
+        retries: 0,
+      }
     );
     if (typeof result.sequence !== "number") return { status: "down" };
     return { status: "ok", latencyMs: Date.now() - startedAt };

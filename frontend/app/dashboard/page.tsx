@@ -395,7 +395,14 @@ export default function DashboardPage() {
 
           {/* Recent Activity — tips received and cash-outs, newest first */}
           <div className="card-brutal p-4 sm:p-6 overflow-x-auto">
-            <h2 className="text-lg font-extrabold text-ink mb-4">Recent Activity</h2>
+            <div className="flex items-baseline justify-between gap-3 mb-4">
+              <h2 className="text-lg font-extrabold text-ink">Recent Activity</h2>
+              {totalDonations !== null && (
+                <p className="text-xs font-bold text-muted tabular-nums">
+                  {donations.length} of {totalDonations} tips
+                </p>
+              )}
+            </div>
             {activity.length === 0 ? (
               <p className="text-muted font-medium">No activity yet. Share your profile link to get started!</p>
             ) : (
