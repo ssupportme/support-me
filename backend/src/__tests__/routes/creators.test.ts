@@ -15,6 +15,7 @@ jest.mock("../../prisma", () => ({
 }));
 
 import request from "supertest";
+import { Prisma } from "@prisma/client";
 import app from "../../app";
 import prisma from "../../prisma";
 import { generateToken } from "../../middleware/auth";
@@ -110,6 +111,20 @@ describe("GET /api/creators/:username", () => {
 
     expect(res.status).toBe(200);
     expect(res.body).toEqual(creator);
+  });
+
+  // Issue #120: the donate page needs a creator's custom preset amounts
+  // (when set) to render quick-select buttons. Uses a username no other
+  // test in this file touches — creatorProfileCache caches by username, so
+  // reusing "bob" here would return another test's cached (unrelated) entry.
+  it("includes the creator's custom preset amounts in the public profile", async () => {
+    const creator = { id: 42, username: "presetcarol", presetAmounts: [2, 5, 20] };
+    mockedPrisma.creator.findUnique.mockResolvedValue(creator);
+
+    const res = await request(app).get("/api/creators/presetcarol");
+
+    expect(res.status).toBe(200);
+    expect(res.body.presetAmounts).toEqual([2, 5, 20]);
   });
 
   it("returns 404 when the creator does not exist", async () => {
@@ -260,6 +275,65 @@ describe("PUT /api/creators/:username", () => {
       data: { acceptsUsdt: true },
     });
   });
+
+  // Issue #120: a creator can optionally customize the quick-select preset
+  // amounts shown on their donate page.
+  it("allows the owner to set custom preset donation amounts", async () => {
+    mockedPrisma.creator.findUnique.mockResolvedValue({ id: 1, userId: 1, username: "bob" });
+    const updated = { id: 1, userId: 1, username: "bob", presetAmounts: [1, 5, 10, 25] };
+    mockedPrisma.creator.update.mockResolvedValue(updated);
+
+    const res = await request(app)
+      .put("/api/creators/bob")
+      .set("Authorization", `Bearer ${token}`)
+      .send({ presetAmounts: [1, 5, 10, 25] });
+
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual(updated);
+    expect(mockedPrisma.creator.update).toHaveBeenCalledWith({
+      where: { username: "bob" },
+      data: { presetAmounts: [1, 5, 10, 25] },
+    });
+  });
+
+  it("allows clearing preset amounts back to the frontend defaults", async () => {
+    mockedPrisma.creator.findUnique.mockResolvedValue({ id: 1, userId: 1, username: "bob" });
+    const updated = { id: 1, userId: 1, username: "bob", presetAmounts: [] };
+    mockedPrisma.creator.update.mockResolvedValue(updated);
+
+    const res = await request(app)
+      .put("/api/creators/bob")
+      .set("Authorization", `Bearer ${token}`)
+      .send({ presetAmounts: [] });
+
+    expect(res.status).toBe(200);
+    expect(mockedPrisma.creator.update).toHaveBeenCalledWith({
+      where: { username: "bob" },
+      data: { presetAmounts: [] },
+    });
+  });
+
+  it("rejects preset amounts containing a non-positive number", async () => {
+    const res = await request(app)
+      .put("/api/creators/bob")
+      .set("Authorization", `Bearer ${token}`)
+      .send({ presetAmounts: [1, 0, 10] });
+
+    expect(res.status).toBe(400);
+    expect(res.body.code).toBe("VALIDATION_ERROR");
+    expect(mockedPrisma.creator.update).not.toHaveBeenCalled();
+  });
+
+  it("rejects more than 6 preset amounts", async () => {
+    const res = await request(app)
+      .put("/api/creators/bob")
+      .set("Authorization", `Bearer ${token}`)
+      .send({ presetAmounts: [1, 2, 3, 4, 5, 6, 7] });
+
+    expect(res.status).toBe(400);
+    expect(res.body.code).toBe("VALIDATION_ERROR");
+    expect(mockedPrisma.creator.update).not.toHaveBeenCalled();
+  });
 });
 
 describe("GET /api/creators/leaderboard (#16)", () => {
@@ -269,6 +343,21 @@ describe("GET /api/creators/leaderboard (#16)", () => {
     // file touches — but clearing between tests keeps that independence
     // explicit instead of implicit.
     leaderboardCache.clear();
+  });
+
+  it("returns exact totals from Decimal sums (0.1 + 0.2 must be 0.3, not 0.30000000000000004)", async () => {
+    expect(0.1 + 0.2).not.toBe(0.3); // the float behaviour this guards against
+    mockedPrisma.donation.groupBy.mockResolvedValue([
+      { creatorId: 1, _sum: { amount: new Prisma.Decimal("0.1").plus("0.2") }, _count: { _all: 2 } },
+    ]);
+    mockedPrisma.creator.findMany.mockResolvedValue([
+      { id: 1, username: "alice", displayName: "Alice", avatarUrl: null },
+    ]);
+
+    const res = await request(app).get("/api/creators/leaderboard?currency=DEC");
+
+    expect(res.status).toBe(200);
+    expect(res.body.items[0].total).toBe(0.3);
   });
 
   it("ranks top creators by total received, defaulting to XLM", async () => {

@@ -23,3 +23,9 @@ backend/.env
 # Demo seed accounts (contains wallet private keys)
 backend/scripts
 
+# Local tooling state
+skills-lock.json
+
+# Sentry scaffolded examples
+frontend/app/api/sentry-example-api/
+frontend/app/sentry-example-page/

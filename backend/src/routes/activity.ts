@@ -1,6 +1,7 @@
 import { Router } from "express";
 import prisma from "../prisma";
 import { asyncHandler } from "../middleware/asyncHandler";
+import { toAmount } from "../lib/money";
 
 const router = Router();
 
@@ -38,13 +39,13 @@ router.get(
 
     const earningsByCurrency: EarningsByCurrency = {};
     for (const row of totalByCurrency) {
-      earningsByCurrency[row.currency] = row._sum.amount ?? 0;
+      earningsByCurrency[row.currency] = toAmount(row._sum.amount);
     }
 
     const earningsByCreator = new Map<number, EarningsByCurrency>();
     for (const row of perCreatorByCurrency) {
       const bucket = earningsByCreator.get(row.creatorId) ?? {};
-      bucket[row.currency] = row._sum.amount ?? 0;
+      bucket[row.currency] = toAmount(row._sum.amount);
       earningsByCreator.set(row.creatorId, bucket);
     }
 

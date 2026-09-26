@@ -7,11 +7,11 @@ import { ProtectedRoute } from '@/components/ProtectedRoute';
 import { AppNav } from '@/components/AppNav';
 import { Skeleton } from '@/components/Skeleton';
 import { notify } from '@/lib/notify';
+import { useNgnRate } from '@/lib/useNgnRate';
 
 const HORIZON_URL = 'https://horizon-testnet.stellar.org';
 const server = new StellarSdk.Horizon.Server(HORIZON_URL);
 const USDC_ISSUER = process.env.NEXT_PUBLIC_USDC_ISSUER;
-const NGN_PER_USDC = 1380;
 
 const NIGERIAN_BANKS = [
   'Access Bank', 'GTBank', 'Kuda', 'Opay', 'UBA', 'Zenith Bank',
@@ -23,6 +23,7 @@ type Stage = 'form' | 'processing' | 'done';
 export default function WithdrawPage() {
   const { user } = useAuth();
   const walletAddress = user?.walletAddress || '';
+  const ngnRate = useNgnRate();
 
   const [xlmBalance, setXlmBalance] = useState<string | null>(null);
   const [usdcBalance, setUsdcBalance] = useState<string | null>(null);
@@ -34,6 +35,9 @@ export default function WithdrawPage() {
   const [stage, setStage] = useState<Stage>('form');
   const [error, setError] = useState<string | null>(null);
   const [ref, setRef] = useState('');
+  const [verifying, setVerifying] = useState(false);
+  const [accountName, setAccountName] = useState<string | null>(null);
+  const [verifyError, setVerifyError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!walletAddress) { setBalancesLoading(false); return; }
@@ -58,8 +62,49 @@ export default function WithdrawPage() {
       .finally(() => setBalancesLoading(false));
   }, [walletAddress]);
 
+  const NGN_PER_USDC = ngnRate?.rate || 1380;
   const naira = amount ? Number(amount) * NGN_PER_USDC : 0;
   const availableUsdc = usdcBalance != null ? parseFloat(usdcBalance) : 0;
+
+  const verifyAccount = async (acctNo: string, selectedBank: string) => {
+    if (!/^\d{10}$/.test(acctNo) || !selectedBank) return;
+    setVerifying(true);
+    setVerifyError(null);
+    setAccountName(null);
+    try {
+      const res = await fetch(`/api/verify-account?accountNo=${acctNo}&bank=${encodeURIComponent(selectedBank)}`);
+      if (res.ok) {
+        const data = await res.json();
+        setAccountName(data.accountName);
+      } else {
+        const data = await res.json().catch(() => ({}));
+        setVerifyError(data.error || 'Could not verify account');
+      }
+    } catch {
+      setVerifyError('Could not reach verification service');
+    } finally {
+      setVerifying(false);
+    }
+  };
+
+  const handleAccountChange = (value: string) => {
+    const digitsOnly = value.replace(/\D/g, '').slice(0, 10);
+    setAccountNo(digitsOnly);
+    setAccountName(null);
+    setVerifyError(null);
+    if (digitsOnly.length === 10 && bank) {
+      verifyAccount(digitsOnly, bank);
+    }
+  };
+
+  const handleBankChange = (value: string) => {
+    setBank(value);
+    setAccountName(null);
+    setVerifyError(null);
+    if (accountNo.length === 10 && value) {
+      verifyAccount(accountNo, value);
+    }
+  };
 
   function submit(e: React.FormEvent) {
     e.preventDefault();
@@ -67,8 +112,9 @@ export default function WithdrawPage() {
     const n = Number(amount);
     if (!Number.isFinite(n) || n <= 0) { setError('Enter an amount greater than zero.'); return; }
     if (usdcBalance !== null && n > availableUsdc) { setError('Amount exceeds your available USDC balance.'); return; }
-    if (accountNo.replace(/\D/g, '').length < 10) { setError('Enter a valid 10-digit account number.'); return; }
+    if (!/^\d{10}$/.test(accountNo)) { setError('Enter a valid 10-digit account number.'); return; }
     if (!bank) { setError('Select your bank.'); return; }
+    if (!accountName && !verifying) { setError('Please verify your account number first.'); return; }
     setStage('processing');
     setTimeout(() => {
       setRef(`PL-${Date.now().toString(36).toUpperCase()}`);
@@ -145,11 +191,21 @@ export default function WithdrawPage() {
                   disabled={stage === 'processing'}
                 />
                 {naira > 0 && (
-                  <p className="mt-1.5 text-sm text-muted font-medium">
-                    You&apos;ll receive ≈{' '}
-                    <span className="font-bold text-ink">₦{naira.toLocaleString()}</span>{' '}
-                    <span className="text-muted">(₦{NGN_PER_USDC.toLocaleString()}/USDC)</span>
-                  </p>
+                  <div className="mt-1.5 text-sm text-muted font-medium">
+                    <p>
+                      You&apos;ll receive ≈{' '}
+                      <span className="font-bold text-ink">₦{naira.toLocaleString()}</span>{' '}
+                      <span className="text-muted">(₦{NGN_PER_USDC.toLocaleString()}/USDC)</span>
+                    </p>
+                    {ngnRate?.ageMinutes != null && (
+                      <p className="text-xs mt-0.5">
+                        Rate as of {ngnRate.ageMinutes === 0 ? 'just now' : `${ngnRate.ageMinutes}m ago`}
+                        {ngnRate.isStale && (
+                          <span className="text-amber-600 font-bold ml-1">· rate may be stale</span>
+                        )}
+                      </p>
+                    )}
+                  </div>
                 )}
               </div>
 
@@ -161,7 +217,7 @@ export default function WithdrawPage() {
                   id="bank"
                   className="input-brutal"
                   value={bank}
-                  onChange={(e) => setBank(e.target.value)}
+                  onChange={(e) => handleBankChange(e.target.value)}
                   disabled={stage === 'processing'}
                 >
                   <option value="">Select bank…</option>
@@ -179,10 +235,21 @@ export default function WithdrawPage() {
                   inputMode="numeric"
                   placeholder="0123456789"
                   value={accountNo}
-                  onChange={(e) => setAccountNo(e.target.value)}
+                  onChange={(e) => handleAccountChange(e.target.value)}
                   maxLength={10}
                   disabled={stage === 'processing'}
                 />
+                {verifying && (
+                  <p className="mt-1.5 text-xs text-muted font-medium">Verifying account…</p>
+                )}
+                {accountName && (
+                  <p className="mt-1.5 text-sm font-bold text-emerald-700">
+                    Account holder: {accountName}
+                  </p>
+                )}
+                {verifyError && (
+                  <p className="mt-1.5 text-sm font-bold text-red-600">{verifyError}</p>
+                )}
               </div>
 
               {error && (

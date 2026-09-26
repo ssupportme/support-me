@@ -6,7 +6,7 @@ import * as StellarSdk from '@stellar/stellar-sdk';
 import { NextIntlClientProvider, useTranslations } from 'next-intl';
 import { notify } from '@/lib/notify';
 import { HugeiconsIcon } from '@hugeicons/react';
-import { PartyIcon, TwitterLogoIcon, LinkIcon } from '@hugeicons/core-free-icons';
+import { PartyIcon, TwitterIcon, LinkIcon } from '@hugeicons/core-free-icons';
 import { connectWallet } from '@/lib/wallet';
 import {
   categorizeWalletError,
@@ -46,7 +46,14 @@ interface Creator {
   acceptsUsdc: boolean;
   acceptsUsdt: boolean;
   donationGoal: number | null;
+  // Creator-configured quick-select donate amounts (#120), set from
+  // Settings. Absent/empty means the creator hasn't customized these.
+  presetAmounts?: number[] | null;
 }
+
+// Fallback quick-select amounts shown on the donate page when a creator
+// hasn't configured their own presets from Settings.
+const DEFAULT_DONATION_PRESETS = ['1', '5', '10', '20'];
 
 interface Goal {
   id: number;
@@ -81,6 +88,8 @@ function CreatorProfileView({ username, locale, onLocaleChange }: CreatorProfile
   const { token, loginWithWallet } = useAuth();
   const [creator, setCreator] = useState<Creator | null>(null);
   const [goals, setGoals] = useState<Goal[]>([]);
+  // 'paused' = the SSE stream dropped and the browser is retrying.
+  const [liveStatus, setLiveStatus] = useState<'connecting' | 'live' | 'paused'>('connecting');
   const [loading, setLoading] = useState(true);
   const [notFound, setNotFound] = useState(false);
 
@@ -101,7 +110,12 @@ function CreatorProfileView({ username, locale, onLocaleChange }: CreatorProfile
 
   const intervalDays = intervalChoice === 'custom' ? customDays : intervalChoice;
 
-  const presets = ['1', '5', '10', '20'];
+  // Use the creator's own presets when they've set any (#120), otherwise
+  // fall back to sensible defaults.
+  const presets =
+    creator?.presetAmounts && creator.presetAmounts.length > 0
+      ? creator.presetAmounts.map((amount) => String(amount))
+      : DEFAULT_DONATION_PRESETS;
 
   const statusLabels: Record<string, string> = useMemo(
     () => ({
@@ -174,11 +188,15 @@ function CreatorProfileView({ username, locale, onLocaleChange }: CreatorProfile
   }, [assetCodes, assetCode]);
 
   // Subscribe to the backend's SSE stream so a live donation bumps the goal
-  // progress without a refresh.
+  // progress without a refresh. The stream is closed while the tab is hidden
+  // (so many open profile tabs don't each hold a connection), and whenever it
+  // is re-established after an error or a hidden period the goals are refetched
+  // to backfill anything that arrived while it was down.
   useEffect(() => {
     if (!creator?.walletAddress) return;
 
-    const source = new EventSource(`${API_URL}/api/events`);
+    let source: EventSource | null = null;
+    let needsBackfill = false;
 
     const handleDonation = (event: MessageEvent) => {
       let payload: { creator: string };
@@ -195,11 +213,47 @@ function CreatorProfileView({ username, locale, onLocaleChange }: CreatorProfile
       void fetchGoals();
     };
 
-    source.addEventListener('donation', handleDonation);
+    const open = () => {
+      if (source) return;
+      setLiveStatus('connecting');
+      const next = new EventSource(`${API_URL}/api/events`);
+      next.onopen = () => {
+        setLiveStatus('live');
+        if (needsBackfill) {
+          needsBackfill = false;
+          void fetchGoals();
+        }
+      };
+      next.onerror = () => {
+        needsBackfill = true;
+        setLiveStatus('paused');
+      };
+      next.addEventListener('donation', handleDonation);
+      source = next;
+    };
 
-    return () => {
+    const close = () => {
+      if (!source) return;
       source.removeEventListener('donation', handleDonation);
       source.close();
+      source = null;
+    };
+
+    const handleVisibilityChange = () => {
+      if (document.hidden) {
+        close();
+      } else {
+        needsBackfill = true;
+        open();
+      }
+    };
+
+    if (!document.hidden) open();
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+      close();
     };
   }, [creator?.walletAddress, fetchGoals]);
 
@@ -540,7 +594,7 @@ function CreatorProfileView({ username, locale, onLocaleChange }: CreatorProfile
               className="btn-brutal btn-brutal-white px-3 py-2 text-sm flex items-center gap-2"
               aria-label={tProfile('share.shareAriaLabel')}
             >
-              <HugeiconsIcon icon={TwitterLogoIcon} size={18} strokeWidth={2} />
+              <HugeiconsIcon icon={TwitterIcon} size={18} strokeWidth={2} />
               {tProfile('share.shareButton')}
             </button>
             <button
@@ -556,6 +610,12 @@ function CreatorProfileView({ username, locale, onLocaleChange }: CreatorProfile
           <div className="flex items-center justify-center mt-4">
             <LanguageSwitcher locale={locale} onChange={onLocaleChange} />
           </div>
+
+          {liveStatus === 'paused' && (
+            <p role="status" className="mt-4 text-xs font-bold text-ink">
+              {tProfile('livePaused')}
+            </p>
+          )}
 
           {goals.length > 0 && (
             <div className="mt-6 pt-6 border-t-2 border-ink text-left space-y-4">
@@ -622,7 +682,7 @@ function CreatorProfileView({ username, locale, onLocaleChange }: CreatorProfile
             <button
               onClick={handleConnectWallet}
               disabled={connecting}
-              className="btn-brutal btn-brutal-primary w-full"
+              className="btn-brutal btn-brutal-primary w-full min-h-[48px]"
             >
               {connecting ? t('connecting') : t('connectWallet')}
             </button>
@@ -651,7 +711,7 @@ function CreatorProfileView({ username, locale, onLocaleChange }: CreatorProfile
                           }
                         }}
                         aria-pressed={assetCode === code}
-                        className={`btn-brutal text-sm px-0 py-2 ${
+                        className={`btn-brutal text-sm px-0 py-2 min-h-[44px] ${
                           assetCode === code ? 'btn-brutal-primary' : 'btn-brutal-white'
                         }`}
                       >
@@ -662,112 +722,127 @@ function CreatorProfileView({ username, locale, onLocaleChange }: CreatorProfile
                 </fieldset>
               )}
 
-              <div>
-                <label htmlFor="donation-amount" className="block text-sm font-bold text-ink mb-2">
-                  {t('amountLabel', { asset: assetCode })}
-                </label>
-                <input
-                  id="donation-amount"
-                  type="number"
-                  min="0.1"
-                  step="0.1"
-                  value={donationAmount}
-                  onChange={(e) => setDonationAmount(e.target.value)}
-                  className="input-brutal"
-                />
-              </div>
-
-              <div className="grid grid-cols-4 gap-2">
-                {presets.map((preset) => (
-                  <button
-                    key={preset}
-                    onClick={() => setDonationAmount(preset)}
-                    className={`btn-brutal text-sm px-0 py-2 ${
-                      donationAmount === preset ? 'btn-brutal-primary' : 'btn-brutal-white'
-                    }`}
-                  >
-                    {preset}
-                  </button>
-                ))}
-              </div>
-
-              <div>
-                <label htmlFor="donation-message" className="block text-sm font-bold text-ink mb-2">
-                  {t('messageLabel')}
-                </label>
-                <textarea
-                  id="donation-message"
-                  value={donationMessage}
-                  onChange={(e) => setDonationMessage(e.target.value)}
-                    maxLength={MAX_MEMO_LENGTH}
-                  placeholder={t('messagePlaceholder')}
-                  className="input-brutal text-sm"
-                  rows={3}
-                />
-                  <p className="text-xs text-muted mt-1 font-medium">
-                    {t('characterCount', { count: donationMessage.length, max: MAX_MEMO_LENGTH })}
-                  </p>
-              </div>
-
-              <div className="flex items-center justify-between gap-3">
-                <label className="flex items-center gap-2 text-sm font-bold text-ink">
-                  <input
-                    type="checkbox"
-                    checked={recurring}
-                    onChange={(e) => setRecurring(e.target.checked)}
-                    className="h-4 w-4 accent-primary"
-                  />
-                  {t('makeRecurring')}
-                </label>
-
-                {recurring && (
-                  <div className="flex items-center gap-1.5">
-                    <select
-                      value={intervalChoice}
-                      onChange={(e) => setIntervalChoice(e.target.value as typeof intervalChoice)}
-                      className="input-brutal text-sm py-1.5 w-auto"
-                    >
-                      <option value="7">{t('intervalWeekly')}</option>
-                      <option value="30">{t('intervalMonthly')}</option>
-                      <option value="custom">{t('intervalCustom')}</option>
-                    </select>
-                    {intervalChoice === 'custom' && (
+              {(() => {
+                const parsedAmt = parseFloat(donationAmount);
+                const isAmountValid = Number.isFinite(parsedAmt) && parsedAmt >= 0.1;
+                return (
+                  <>
+                    <div>
+                      <label htmlFor="donation-amount" className="block text-sm font-bold text-ink mb-2">
+                        {t('amountLabel', { asset: assetCode })}
+                      </label>
                       <input
+                        id="donation-amount"
                         type="number"
-                        min="1"
-                        max={MAX_CHARGE_INTERVAL_DAYS}
-                        step="1"
-                        value={customDays}
-                        onChange={(e) => setCustomDays(e.target.value)}
-                        aria-label={t('daysBetweenChargesLabel')}
-                        title={t('daysBetweenChargesTitle', { max: MAX_CHARGE_INTERVAL_DAYS })}
-                        className="input-brutal text-sm py-1.5 w-14"
+                        min="0.1"
+                        step="0.1"
+                        value={donationAmount}
+                        onChange={(e) => setDonationAmount(e.target.value)}
+                        className={`input-brutal ${!isAmountValid ? 'border-red-500' : ''}`}
                       />
+                      {!isAmountValid && (
+                        <p className="text-xs text-red-600 font-bold mt-1" role="alert">
+                          {donationAmount.trim() === ''
+                            ? t('amountRequired')
+                            : t('amountInvalid')}
+                        </p>
+                      )}
+                    </div>
+
+                    <div className="grid grid-cols-4 gap-2">
+                      {presets.map((preset) => (
+                        <button
+                          key={preset}
+                          onClick={() => setDonationAmount(preset)}
+                          className={`btn-brutal text-sm px-0 py-2 min-h-[44px] ${
+                            donationAmount === preset ? 'btn-brutal-primary' : 'btn-brutal-white'
+                          }`}
+                        >
+                          {preset}
+                        </button>
+                      ))}
+                    </div>
+
+                    <div>
+                      <label htmlFor="donation-message" className="block text-sm font-bold text-ink mb-2">
+                        {t('messageLabel')}
+                      </label>
+                      <textarea
+                        id="donation-message"
+                        value={donationMessage}
+                        onChange={(e) => setDonationMessage(e.target.value)}
+                        maxLength={MAX_MEMO_LENGTH}
+                        placeholder={t('messagePlaceholder')}
+                        className="input-brutal text-sm"
+                        rows={3}
+                      />
+                      <p className="text-xs text-muted mt-1 font-medium">
+                        {t('characterCount', { count: donationMessage.length, max: MAX_MEMO_LENGTH })}
+                      </p>
+                    </div>
+
+                    <div className="flex items-center justify-between gap-3">
+                      <label className="flex items-center gap-2 text-sm font-bold text-ink">
+                        <input
+                          type="checkbox"
+                          checked={recurring}
+                          onChange={(e) => setRecurring(e.target.checked)}
+                          className="h-4 w-4 accent-primary"
+                        />
+                        {t('makeRecurring')}
+                      </label>
+
+                      {recurring && (
+                        <div className="flex items-center gap-1.5">
+                          <select
+                            value={intervalChoice}
+                            onChange={(e) => setIntervalChoice(e.target.value as typeof intervalChoice)}
+                            className="input-brutal text-sm py-1.5 w-auto min-h-[44px]"
+                          >
+                            <option value="7">{t('intervalWeekly')}</option>
+                            <option value="30">{t('intervalMonthly')}</option>
+                            <option value="custom">{t('intervalCustom')}</option>
+                          </select>
+                          {intervalChoice === 'custom' && (
+                            <input
+                              type="number"
+                              min="1"
+                              max={MAX_CHARGE_INTERVAL_DAYS}
+                              step="1"
+                              value={customDays}
+                              onChange={(e) => setCustomDays(e.target.value)}
+                              aria-label={t('daysBetweenChargesLabel')}
+                              title={t('daysBetweenChargesTitle', { max: MAX_CHARGE_INTERVAL_DAYS })}
+                              className="input-brutal text-sm py-1.5 w-14 min-h-[44px]"
+                            />
+                          )}
+                        </div>
+                      )}
+                    </div>
+
+                    {recurring && (
+                      <p className="text-xs text-muted font-medium -mt-2">
+                        {t('recurringHint', {
+                          period:
+                            intervalChoice === '7'
+                              ? t('periodWeek')
+                              : intervalChoice === '30'
+                                ? t('periodMonth')
+                                : t('periodOther'),
+                        })}
+                      </p>
                     )}
-                  </div>
-                )}
-              </div>
 
-              {recurring && (
-                <p className="text-xs text-muted font-medium -mt-2">
-                  {t('recurringHint', {
-                    period:
-                      intervalChoice === '7'
-                        ? t('periodWeek')
-                        : intervalChoice === '30'
-                          ? t('periodMonth')
-                          : t('periodOther'),
-                  })}
-                </p>
-              )}
-
-              <button
-                onClick={recurring ? handleStartSubscription : handleSendDonation}
-                disabled={sending || !creator.walletAddress}
-                className="btn-brutal btn-brutal-lime w-full"
-              >
-                {recurring ? t('startRecurringDonation') : t('sendDonation')}
-              </button>
+                    <button
+                      onClick={recurring ? handleStartSubscription : handleSendDonation}
+                      disabled={sending || !creator.walletAddress || !isAmountValid}
+                      className="btn-brutal btn-brutal-lime w-full disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      {recurring ? t('startRecurringDonation') : t('sendDonation')}
+                    </button>
+                  </>
+                );
+              })()}
             </div>
           )}
         </div>

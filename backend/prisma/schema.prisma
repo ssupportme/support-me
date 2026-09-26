@@ -105,6 +105,14 @@ model Creator {
   // change alone — the migration copies each non-null value into a new Goal
   // row before the column stops being read by the API.
   donationGoal  Int?
+  // Optional quick-select amounts a creator can configure for the donate
+  // page's preset buttons (#120), e.g. [1, 5, 10, 25]. Nullable/empty means
+  // the creator hasn't customized these — the frontend falls back to
+  // hardcoded defaults rather than the API making up a default list, so an
+  // empty array and "never configured" stay distinguishable if that
+  // matters later. Denominated in whatever asset the supporter picks on
+  // the donate page, same as Goal.currency — not tied to a single currency.
+  presetAmounts Float[]        @default([])
   createdAt     DateTime       @default(now())
   updatedAt     DateTime       @updatedAt
   donations     Donation[]
@@ -120,7 +128,7 @@ model Donation {
   creator         Creator                 @relation(fields: [creatorId], references: [id])
   creatorId       Int
   senderAddress   String
-  amount          Float
+  amount          Decimal                 @db.Decimal(20, 7)
   currency        String                  @default("XLM")
   message         String?
   transactionHash String?
@@ -151,9 +159,9 @@ model Withdrawal {
   id          Int      @id @default(autoincrement())
   creator     Creator  @relation(fields: [creatorId], references: [id])
   creatorId   Int
-  amountIn    Float // crypto withdrawn (SEP-24 amount_in)
-  amountOut   Float? // fiat received (amount_out), when the anchor reports it
-  fee         Float? // amount_fee
+  amountIn    Decimal  @db.Decimal(20, 7) // crypto withdrawn (SEP-24 amount_in)
+  amountOut   Decimal? @db.Decimal(20, 7) // fiat received (amount_out), when the anchor reports it
+  fee         Decimal? @db.Decimal(20, 7) // amount_fee
   currency    String   @default("USDC") // asset withdrawn
   anchorTxId  String // SEP-24 transaction id
   stellarTxId String? // on-chain payment to the anchor (stellar_transaction_id)
@@ -220,7 +228,7 @@ model Subscription {
   creatorId         Int
   supporterAddress  String
   token             String // asset code, e.g. "XLM" or "USDC"
-  amount            Float // amount charged per interval
+  amount            Decimal @db.Decimal(20, 7) // amount charged per interval
   intervalSecs      Int
   onChainId         Int       @unique // subscription_id returned by the donation contract's subscribe()
   subscribeTxHash   String?
@@ -232,6 +240,7 @@ model Subscription {
   // and cleared on the next successful charge, so failures are visible
   // without the executor retrying forever on its own.
   lastError         String?
+  failureCount      Int       @default(0)
   // When the supporter was last emailed about a failing charge, so the
   // executor (which retries every tick) sends one notice per failure streak
   // instead of one per retry. Cleared on the next successful charge.

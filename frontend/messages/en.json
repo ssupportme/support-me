@@ -13,6 +13,7 @@
       "linkCopied": "Link copied to clipboard!",
       "copyFailed": "Failed to copy link"
     },
+    "livePaused": "Live updates paused — reconnecting…",
     "goals": {
       "fallbackTitle": "Goal",
       "recurringBadge": "Recurring",
@@ -30,6 +31,8 @@
     "installWalletTitle": "Install a Stellar wallet to continue",
     "assetLegend": "Asset",
     "amountLabel": "Amount ({asset})",
+    "amountRequired": "Please enter a donation amount.",
+    "amountInvalid": "Amount must be a positive number (minimum 0.1).",
     "messageLabel": "Message (Optional)",
     "messagePlaceholder": "Thanks for your work!",
     "characterCount": "{count}/{max}",

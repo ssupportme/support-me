@@ -1,4 +1,5 @@
 import { rpc } from "@stellar/stellar-sdk";
+import { isTransientSorobanError, withRetry } from "./retry";
 
 /** The public testnet endpoint used when no endpoint has been configured. */
 export const DEFAULT_SOROBAN_RPC_URL = "https://soroban-testnet.stellar.org";
@@ -21,6 +22,16 @@ export interface SorobanRpcOptions {
   timeoutMs?: number;
   /** Optional deadline for the complete failover sequence. */
   totalTimeoutMs?: number;
+  /**
+   * Extra attempts after a transient failure across the whole endpoint pool
+   * (#27). Defaults to 3. Set to 0 for short-lived probes, where retrying
+   * would outlive the caller's own deadline.
+   */
+  retries?: number;
+  /** First backoff delay between attempts. Defaults to 250ms. */
+  retryBaseDelayMs?: number;
+  /** Upper bound on a single backoff delay. Defaults to 5s. */
+  retryMaxDelayMs?: number;
 }
 
 /**
@@ -64,6 +75,20 @@ function errorMessage(error: unknown): string {
   return String(error);
 }
 
+/**
+ * Digs the underlying failure out of the aggregate error so classification
+ * sees the real reason (a timeout, a rate limit, a revert) instead of the
+ * "failed on all configured endpoints" summary.
+ */
+function unwrapCause(error: unknown): unknown {
+  if (error instanceof Error) {
+    // `cause` is ES2022; the project targets ES2020, so read it structurally.
+    const cause = (error as Error & { cause?: unknown }).cause;
+    if (cause !== undefined) return cause;
+  }
+  return error;
+}
+
 function orderedEndpoints(): string[] {
   const endpoints = getSorobanRpcUrls();
   if (!lastSuccessfulEndpoint || !endpoints.includes(lastSuccessfulEndpoint)) {
@@ -99,6 +124,12 @@ async function withTimeout<T>(
  * Every failed endpoint is logged, and the endpoint that actually served a
  * successful request is logged as well. The last error is retained as the
  * cause of the aggregate error for callers and observability tools.
+ *
+ * The endpoint sweep is itself wrapped in withRetry, so a pool-wide transient
+ * outage (every endpoint rate-limiting, or a brief network blip) is absorbed
+ * with exponential backoff instead of surfacing to the user (#27). A failure
+ * the chain itself rejected — a contract revert, a bad request — is not
+ * transient, so the sweep runs exactly once and the error is rethrown.
  */
 export async function withSorobanRpcFailover<T>(
   operationName: string,
@@ -111,40 +142,53 @@ export async function withSorobanRpcFailover<T>(
   const startedAt = Date.now();
   let lastError: unknown;
 
-  for (const endpoint of endpoints) {
-    const remaining = options.totalTimeoutMs
-      ? options.totalTimeoutMs - (Date.now() - startedAt)
-      : timeoutMs;
-    if (remaining <= 0) {
-      lastError = new Error(`${operationName} exceeded its total timeout`);
-      break;
-    }
-    const attemptTimeout = Math.min(timeoutMs, remaining);
+  const sweepEndpoints = async (): Promise<T> => {
+    for (const endpoint of endpoints) {
+      const remaining = options.totalTimeoutMs
+        ? options.totalTimeoutMs - (Date.now() - startedAt)
+        : timeoutMs;
+      if (remaining <= 0) {
+        lastError = new Error(`${operationName} exceeded its total timeout`);
+        break;
+      }
+      const attemptTimeout = Math.min(timeoutMs, remaining);
 
-    try {
-      const result = await withTimeout(
-        operation(endpoint),
-        attemptTimeout,
-        `${operationName} via ${formatSorobanRpcEndpoint(endpoint)}`
-      );
-      lastSuccessfulEndpoint = endpoint;
-      console.info(
-        `[Soroban RPC] ${operationName} served by ${formatSorobanRpcEndpoint(endpoint)}`
-      );
-      return result;
-    } catch (error) {
-      lastError = error;
-      console.warn(
-        `[Soroban RPC] ${operationName} failed via ${formatSorobanRpcEndpoint(endpoint)}: ${errorMessage(error)}`
-      );
+      try {
+        const result = await withTimeout(
+          operation(endpoint),
+          attemptTimeout,
+          `${operationName} via ${formatSorobanRpcEndpoint(endpoint)}`
+        );
+        lastSuccessfulEndpoint = endpoint;
+        console.info(
+          `[Soroban RPC] ${operationName} served by ${formatSorobanRpcEndpoint(endpoint)}`
+        );
+        return result;
+      } catch (error) {
+        lastError = error;
+        console.warn(
+          `[Soroban RPC] ${operationName} failed via ${formatSorobanRpcEndpoint(endpoint)}: ${errorMessage(error)}`
+        );
+      }
     }
-  }
 
-  const aggregate = new Error(
-    `Soroban RPC ${operationName} failed on all configured endpoints (${endpoints.length})`
-  );
-  (aggregate as Error & { cause?: unknown }).cause = lastError;
-  throw aggregate;
+    const aggregate = new Error(
+      `Soroban RPC ${operationName} failed on all configured endpoints (${endpoints.length})`
+    );
+    (aggregate as Error & { cause?: unknown }).cause = lastError;
+    throw aggregate;
+  };
+
+  return withRetry(operationName, sweepEndpoints, {
+    retries: options.retries ?? 3,
+    baseDelayMs: options.retryBaseDelayMs,
+    maxDelayMs: options.retryMaxDelayMs,
+    totalTimeoutMs: options.totalTimeoutMs,
+    // The aggregate error wraps the real cause, so the retry decision has to
+    // be made on the cause rather than on the "failed on all configured
+    // endpoints" wrapper text.
+    shouldRetry: (error) => isTransientSorobanError(unwrapCause(error)),
+  });
 }
 
 /**

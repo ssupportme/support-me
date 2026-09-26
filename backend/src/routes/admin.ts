@@ -6,6 +6,7 @@ import { asyncHandler } from "../middleware/asyncHandler";
 import { validate } from "../middleware/validate";
 import { listAdminAuditQuerySchema } from "../schemas/admin";
 import { recordAdminActionSafely, adminAuditMiddleware } from "../services/adminAuditLog";
+import { toAmount } from "../lib/money";
 
 const router = Router();
 
@@ -20,9 +21,12 @@ type EarningsByCurrency = Record<string, number>;
 
 router.get(
   "/overview",
+  validate({ query: listAdminAuditQuerySchema }),
   asyncHandler(async (req: AuthRequest, res) => {
+    const { page, limit } = req.query as unknown as { page: number; limit: number };
+
     // Run the independent aggregates concurrently.
-    const [totalSignups, totalCreators, totalByCurrency, perCreatorByCurrency, users] =
+    const [totalSignups, totalCreators, totalByCurrency, perCreatorByCurrency, users, failingSubscriptions] =
       await Promise.all([
         prisma.user.count(),
         prisma.creator.count(),
@@ -43,19 +47,28 @@ router.get(
         prisma.user.findMany({
           orderBy: { createdAt: "desc" },
           include: { creator: true },
+          skip: (page - 1) * limit,
+          take: limit,
+        }),
+        // Surface long-failing subscriptions for admin visibility
+        prisma.subscription.findMany({
+          where: { failureCount: { gt: 0 } },
+          include: { creator: true },
+          orderBy: { failureCount: "desc" },
+          take: 50,
         }),
       ]);
 
     const earningsByCurrency: EarningsByCurrency = {};
     for (const row of totalByCurrency) {
-      earningsByCurrency[row.currency] = row._sum.amount ?? 0;
+      earningsByCurrency[row.currency] = toAmount(row._sum.amount);
     }
 
     // creatorId -> { currency -> summed amount }
     const earningsByCreator = new Map<number, EarningsByCurrency>();
     for (const row of perCreatorByCurrency) {
       const bucket = earningsByCreator.get(row.creatorId) ?? {};
-      bucket[row.currency] = row._sum.amount ?? 0;
+      bucket[row.currency] = toAmount(row._sum.amount);
       earningsByCreator.set(row.creatorId, bucket);
     }
 
@@ -81,7 +94,14 @@ router.get(
       totalSignups,
       totalCreators,
       earningsByCurrency,
+      failingSubscriptions,
       users: userRows,
+      pagination: {
+        page,
+        limit,
+        total: totalSignups,
+        totalPages: Math.ceil(totalSignups / limit),
+      },
     });
   })
 );

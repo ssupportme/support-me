@@ -15,22 +15,33 @@ import {
 import { UnauthorizedError } from '../errors/AppError';
 import { requestMagicLink, verifyMagicLink } from '../services/magicLink';
 import { completeTwitterAuth, startTwitterAuth } from '../services/twitterAuth';
+import { ChallengeStore } from '../services/challengeStore';
+import { RateLimiter } from '../services/rateLimiter';
+import { clientIp, rateLimit } from '../middleware/rateLimit';
 
 const router = Router();
 
 const STELLAR_SIGNED_MESSAGE_PREFIX = 'Stellar Signed Message:\n';
 const CHALLENGE_TTL_MS = 5 * 60 * 1000;
 
-interface Challenge {
-  message: string;
-  expiresAt: number;
-}
+// Bounded, self-sweeping store (see services/challengeStore.ts for the
+// single-instance caveat).
+export const challenges = new ChallengeStore();
+challenges.startSweeping();
 
-const challenges = new Map<string, Challenge>();
+// Per-IP and per-wallet limits on the wallet sign-in endpoints. Generous for a
+// real user retrying a signature, tight enough to stop a flood from growing the
+// challenge store or hammering /verify.
+export const challengeIpLimiter = new RateLimiter(30, 60 * 1000);
+export const challengeWalletLimiter = new RateLimiter(5, 60 * 1000);
+export const verifyIpLimiter = new RateLimiter(30, 60 * 1000);
+export const verifyWalletLimiter = new RateLimiter(10, 60 * 1000);
 
 router.post(
   '/challenge',
+  rateLimit(challengeIpLimiter, clientIp, 'sign-in challenge'),
   validate({ body: challengeSchema }),
+  rateLimit(challengeWalletLimiter, (req) => req.body.walletAddress, 'sign-in challenge'),
   asyncHandler(async (req, res) => {
     const { walletAddress } = req.body;
 
@@ -45,7 +56,9 @@ router.post(
 
 router.post(
   '/verify',
+  rateLimit(verifyIpLimiter, clientIp, 'sign-in verification'),
   validate({ body: verifySchema }),
+  rateLimit(verifyWalletLimiter, (req) => req.body.walletAddress, 'sign-in verification'),
   asyncHandler(async (req, res) => {
     const { walletAddress, signedMessage } = req.body;
 

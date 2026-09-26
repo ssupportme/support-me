@@ -7,6 +7,7 @@ import { notify } from '@/lib/notify';
 import { HugeiconsIcon } from '@hugeicons/react';
 import { ImageUpload01Icon } from '@hugeicons/core-free-icons';
 import { useAuth } from '@/context/AuthContext';
+import { useCreator } from '@/context/CreatorContext';
 import { ProtectedRoute } from '@/components/ProtectedRoute';
 import { AppNav } from '@/components/AppNav';
 import { QrCodeCard } from '@/components/QrCodeCard';
@@ -16,21 +17,6 @@ import { uploadAvatar } from '@/lib/upload';
 import { API_URL } from '@/lib/api';
 import { fetchWithRetry, isNetworkError } from '@/lib/network';
 import { AccountDataSection } from '@/components/AccountDataSection';
-
-interface Creator {
-  id: number;
-  userId: number;
-  username: string;
-  displayName: string | null;
-  bio: string | null;
-  walletAddress: string;
-  avatarUrl: string | null;
-  socialLinks: Record<string, string> | null;
-  acceptsXlm: boolean;
-  acceptsUsdc: boolean;
-  acceptsUsdt: boolean;
-  donationGoal: number | null;
-}
 
 interface Goal {
   id: number;
@@ -47,13 +33,9 @@ const GOAL_CURRENCIES = ['XLM', 'USDC', 'USDT'];
 
 export default function SettingsPage() {
   const { user, token } = useAuth();
-  const [creator, setCreator] = useState<Creator | null>(null);
-  const [loading, setLoading] = useState(true);
+  const { creator, loading: creatorLoading, invalidate } = useCreator();
   const [saving, setSaving] = useState(false);
   const [uploading, setUploading] = useState(false);
-  // Tracks edits made via the form's own onChange handlers only — never set
-  // by the initial fetchCreator population — so we can warn before an
-  // accidental tab close/refresh loses unsaved changes.
   const [dirty, setDirty] = useState(false);
 
   const [displayName, setDisplayName] = useState('');
@@ -63,14 +45,9 @@ export default function SettingsPage() {
   const [acceptsUsdc, setAcceptsUsdc] = useState(true);
   const [acceptsUsdt, setAcceptsUsdt] = useState(false);
   const [donationGoal, setDonationGoal] = useState('');
-  // Raw per-platform input as the creator sees it (bare handle or full URL). We
-  // normalize to full URLs only on save.
+  const [presetAmountsInput, setPresetAmountsInput] = useState('');
   const [socials, setSocials] = useState<Record<string, string>>({});
 
-  // Goals (issue #20): a creator can track several simultaneous and/or
-  // recurring goals, managed independently of the Profile/Payments/Socials
-  // form above (each goal is created/ended via its own API call, not bundled
-  // into the profile PUT).
   const [goals, setGoals] = useState<Goal[]>([]);
   const [goalsLoading, setGoalsLoading] = useState(true);
   const [creatingGoal, setCreatingGoal] = useState(false);
@@ -82,35 +59,22 @@ export default function SettingsPage() {
 
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  // Populate form fields from the shared creator data
   useEffect(() => {
-    const fetchCreator = async () => {
-      if (!user || !token) return;
-      try {
-        const res = await fetchWithRetry(`${API_URL}/api/creators/me`, {
-          headers: { Authorization: `Bearer ${token}` },
-        });
-        if (res.status === 404) return;
-        if (!res.ok) throw new Error('Failed to load your profile');
-        const mine: Creator = await res.json();
-        setCreator(mine);
-        setDisplayName(mine.displayName || '');
-        setBio(mine.bio || '');
-        setAvatarUrl(mine.avatarUrl || '');
-        setAcceptsXlm(mine.acceptsXlm ?? true);
-        setAcceptsUsdc(mine.acceptsUsdc ?? true);
-        setAcceptsUsdt(mine.acceptsUsdt ?? false);
-        setDonationGoal(mine.donationGoal != null ? String(mine.donationGoal) : '');
-        setSocials(mine.socialLinks || {});
-        await fetchGoals(mine.username);
-      } catch (err) {
-        if (isNetworkError(err)) return;
-        notify.error('Could not load settings', err);
-      } finally {
-        setLoading(false);
-      }
-    };
-    fetchCreator();
-  }, [user, token]);
+    if (!creator) return;
+    setDisplayName(creator.displayName || '');
+    setBio((creator as any).bio || '');
+    setAvatarUrl(creator.avatarUrl || '');
+    setAcceptsXlm(creator.acceptsXlm ?? true);
+    setAcceptsUsdc(creator.acceptsUsdc ?? true);
+    setAcceptsUsdt(creator.acceptsUsdt ?? false);
+    setDonationGoal(creator.donationGoal != null ? String(creator.donationGoal) : '');
+    setPresetAmountsInput(
+      creator.presetAmounts && creator.presetAmounts.length > 0 ? creator.presetAmounts.join(', ') : ''
+    );
+    setSocials(creator.socialLinks || {});
+    fetchGoals(creator.username);
+  }, [creator]);
 
   // Goals endpoint is public (GET /api/goals/:username), keyed by username
   // rather than needing auth — only create/edit require the owner's token.
@@ -252,6 +216,26 @@ export default function SettingsPage() {
       goal = parsed;
     }
 
+    // Parse the preset amounts field into a validated array (#120); a blank
+    // field clears any customization, falling back to the donate page's own
+    // hardcoded defaults.
+    let presetAmounts: number[] = [];
+    if (presetAmountsInput.trim()) {
+      const parts = presetAmountsInput
+        .split(',')
+        .map((part) => part.trim())
+        .filter(Boolean);
+      if (parts.length > 6) {
+        notify.error('Enter at most 6 preset amounts.');
+        return;
+      }
+      presetAmounts = parts.map(Number);
+      if (presetAmounts.some((n) => !Number.isFinite(n) || n <= 0)) {
+        notify.error('Preset amounts must be positive numbers.');
+        return;
+      }
+    }
+
     // Fold raw social inputs into full URLs, dropping any left blank.
     const socialLinks: Record<string, string> = {};
     for (const platform of SOCIAL_PLATFORMS) {
@@ -277,6 +261,7 @@ export default function SettingsPage() {
           acceptsUsdc,
           acceptsUsdt,
           donationGoal: goal,
+          presetAmounts,
           socialLinks,
         }),
       });
@@ -285,6 +270,7 @@ export default function SettingsPage() {
         throw new Error(body.error || 'Failed to save changes');
       }
       setDirty(false);
+      invalidate();
       notify.success('Settings saved.');
     } catch (err) {
       if (isNetworkError(err)) return;
@@ -294,7 +280,7 @@ export default function SettingsPage() {
     }
   };
 
-  if (loading) {
+  if (creatorLoading) {
     return (
       <ProtectedRoute>
         <div className="min-h-screen bg-background">
@@ -375,7 +361,7 @@ export default function SettingsPage() {
                     type="button"
                     onClick={() => fileInputRef.current?.click()}
                     disabled={uploading}
-                    className="btn-brutal btn-brutal-white gap-1.5"
+                    className="btn-brutal btn-brutal-white gap-1.5 min-h-[44px] px-4 flex items-center justify-center font-bold"
                   >
                     <HugeiconsIcon icon={ImageUpload01Icon} size={18} strokeWidth={2} />
                     {uploading ? 'Uploading…' : 'Upload avatar'}
@@ -398,7 +384,7 @@ export default function SettingsPage() {
                   }}
                   maxLength={80}
                   placeholder={creator.username}
-                  className="input-brutal"
+                  className="input-brutal min-h-[44px]"
                 />
               </div>
 
@@ -416,7 +402,7 @@ export default function SettingsPage() {
                   maxLength={500}
                   rows={4}
                   placeholder="Tell supporters what you're about."
-                  className="input-brutal resize-y"
+                  className="input-brutal resize-y text-base sm:text-sm"
                 />
                 <p className="text-xs text-muted mt-2 font-medium text-right">{bio.length}/500</p>
               </div>
@@ -427,7 +413,7 @@ export default function SettingsPage() {
               <h2 className="text-lg font-extrabold text-ink">Payments</h2>
               <p className="text-sm text-muted font-medium">Choose which assets supporters can tip you in.</p>
 
-              <label className="flex items-center justify-between gap-4 cursor-pointer">
+              <label className="flex items-center justify-between gap-4 cursor-pointer min-h-[44px] py-1">
                 <span className="font-bold text-ink">Accept XLM</span>
                 <input
                   type="checkbox"
@@ -436,10 +422,10 @@ export default function SettingsPage() {
                     setAcceptsXlm(e.target.checked);
                     setDirty(true);
                   }}
-                  className="w-5 h-5 accent-primary"
+                  className="w-5 h-5 accent-primary min-h-[20px] min-w-[20px]"
                 />
               </label>
-              <label className="flex items-center justify-between gap-4 cursor-pointer">
+              <label className="flex items-center justify-between gap-4 cursor-pointer min-h-[44px] py-1">
                 <span className="font-bold text-ink">Accept USDC</span>
                 <input
                   type="checkbox"
@@ -448,7 +434,7 @@ export default function SettingsPage() {
                     setAcceptsUsdc(e.target.checked);
                     setDirty(true);
                   }}
-                  className="w-5 h-5 accent-primary"
+                  className="w-5 h-5 accent-primary min-h-[20px] min-w-[20px]"
                 />
               </label>
               <label className="flex items-center justify-between gap-4 cursor-pointer">
@@ -460,9 +446,36 @@ export default function SettingsPage() {
                     setAcceptsUsdt(e.target.checked);
                     setDirty(true);
                   }}
-                  className="w-5 h-5 accent-primary"
+                  placeholder="e.g. 1000"
+                  className="input-brutal min-h-[44px]"
                 />
               </label>
+            </section>
+
+            {/* Preset donation amounts (#120) */}
+            <section className="space-y-4 border-t-2 border-ink pt-6">
+              <h2 className="text-lg font-extrabold text-ink">Preset donation amounts</h2>
+              <p className="text-sm text-muted font-medium">
+                Quick-select amounts shown as buttons on your donate page, in
+                whichever asset a supporter picks. Leave blank to use the
+                defaults (1, 5, 10, 20).
+              </p>
+              <div>
+                <label htmlFor="presetAmounts" className="block text-sm font-bold text-ink mb-2">
+                  Amounts (comma-separated, up to 6)
+                </label>
+                <input
+                  id="presetAmounts"
+                  type="text"
+                  value={presetAmountsInput}
+                  onChange={(e) => {
+                    setPresetAmountsInput(e.target.value);
+                    setDirty(true);
+                  }}
+                  placeholder="1, 5, 10, 25"
+                  className="input-brutal"
+                />
+              </div>
             </section>
 
             {/* Goals */}
@@ -623,7 +636,7 @@ export default function SettingsPage() {
                         setDirty(true);
                       }}
                       placeholder={platform.label}
-                      className="input-brutal pl-11"
+                      className="input-brutal pl-11 min-h-[44px]"
                     />
                   </div>
                 ))}
@@ -634,7 +647,7 @@ export default function SettingsPage() {
               <button
                 onClick={handleSave}
                 disabled={saving || uploading}
-                className="btn-brutal btn-brutal-primary w-full"
+                className="btn-brutal btn-brutal-primary w-full min-h-[48px] text-base font-extrabold flex items-center justify-center"
               >
                 {saving ? 'Saving…' : 'Save changes'}
               </button>

@@ -13,6 +13,7 @@
       "linkCopied": "¡Enlace copiado al portapapeles!",
       "copyFailed": "No se pudo copiar el enlace"
     },
+    "livePaused": "Actualizaciones en vivo pausadas — reconectando…",
     "goals": {
       "fallbackTitle": "Meta",
       "recurringBadge": "Recurrente",
@@ -30,6 +31,8 @@
     "installWalletTitle": "Instala una billetera de Stellar para continuar",
     "assetLegend": "Activo",
     "amountLabel": "Cantidad ({asset})",
+    "amountRequired": "Ingresa un monto de donación.",
+    "amountInvalid": "El monto debe ser un número positivo (mínimo 0.1).",
     "messageLabel": "Mensaje (opcional)",
     "messagePlaceholder": "¡Gracias por tu trabajo!",
     "characterCount": "{count}/{max}",

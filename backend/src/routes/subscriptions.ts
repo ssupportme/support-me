@@ -11,18 +11,41 @@ const router = Router();
 
 router.get(
   "/",
+  authMiddleware as any,
   validate({ query: listSubscriptionsQuerySchema }),
-  asyncHandler(async (req, res) => {
+  asyncHandler(async (req: AuthRequest, res) => {
+    if (!req.user) {
+      throw new UnauthorizedError("User not authenticated");
+    }
+
     const { creatorUsername, supporterAddress } = req.query as {
       creatorUsername?: string;
       supporterAddress?: string;
     };
 
+    // Require explicit ownership: caller must be requesting their own subscriptions
+    // or be the creator viewing subscribers.
+    let targetSupporterAddress: string | null | undefined = supporterAddress;
+
+    if (targetSupporterAddress && targetSupporterAddress !== req.user.walletAddress) {
+      // Check if the caller is the target creator
+      if (creatorUsername) {
+        const creator = await prisma.creator.findUnique({ where: { username: creatorUsername } });
+        if (!creator || creator.walletAddress !== req.user.walletAddress) {
+          throw new UnauthorizedError("You are not authorized to view these subscriptions");
+        }
+      } else {
+        throw new UnauthorizedError("You can only view your own subscriptions");
+      }
+    } else if (!targetSupporterAddress && !creatorUsername) {
+      targetSupporterAddress = req.user.walletAddress;
+    }
+
     const subscriptions = await prisma.subscription.findMany({
       orderBy: { createdAt: "desc" },
       where: {
         ...(creatorUsername ? { creator: { username: creatorUsername } } : {}),
-        ...(supporterAddress ? { supporterAddress } : {}),
+        ...(targetSupporterAddress ? { supporterAddress: targetSupporterAddress } : {}),
       },
       include: {
         creator: { select: { username: true, displayName: true, avatarUrl: true } },

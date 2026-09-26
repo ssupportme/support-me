@@ -15,17 +15,23 @@ export function reportBoundaryError(
     pathname ?? (typeof window !== 'undefined' ? window.location.pathname : undefined);
   const search = typeof window !== 'undefined' ? window.location.search : undefined;
 
-  return Sentry.withScope((scope) => {
-    scope.setLevel(boundary === 'global' ? 'fatal' : 'error');
-    scope.setTag('error_boundary', boundary);
-    if (route) scope.setTag('route', route);
-    if (error.digest) scope.setTag('digest', error.digest);
-    scope.setContext('error_boundary', {
-      boundary,
-      route,
-      search: search || undefined,
-      digest: error.digest,
-    });
-    return Sentry.captureException(error);
+  // Sentry's scope helpers (withScope/getIsolationScope) are not exported in
+  // @sentry/nextjs's type surface, so the boundary metadata is attached via the
+  // typed capture context instead — same level/tags/contexts, no untyped cast.
+  return Sentry.captureException(error, {
+    level: boundary === 'global' ? 'fatal' : 'error',
+    tags: {
+      error_boundary: boundary,
+      ...(route ? { route } : {}),
+      ...(error.digest ? { digest: error.digest } : {}),
+    },
+    contexts: {
+      error_boundary: {
+        boundary,
+        route,
+        search: search || undefined,
+        digest: error.digest,
+      },
+    },
   });
 }

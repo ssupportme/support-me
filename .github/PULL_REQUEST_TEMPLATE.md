@@ -31,3 +31,4 @@
 - [ ] `npm run build` / `cargo test` passes locally where relevant
 - [ ] Docs updated if behavior or setup changed
 - [ ] No secrets or credentials included in the diff
+- [ ] No scaffolded example code (e.g. Sentry routes) unintentionally included
