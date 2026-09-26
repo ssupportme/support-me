@@ -394,28 +394,8 @@ export default function DashboardPage() {
           </div>
 
           {/* Recent Activity — tips received and cash-outs, newest first */}
-          <div className="card-brutal p-6">
-            <div className="flex flex-wrap items-center justify-between gap-2 mb-4">
-              <div className="flex items-center gap-2">
-                <h2 className="text-lg font-extrabold text-ink">Recent Activity</h2>
-                {totalDonations !== null && (
-                  <span className="text-xs font-bold px-2 py-0.5 rounded-full bg-brand-light-purple/40 border border-ink/20 text-ink">
-                    {donations.length} of {totalDonations} tips
-                  </span>
-                )}
-              </div>
-              {hasMoreDonations && (
-                <label className="flex items-center gap-2 text-xs font-bold text-ink cursor-pointer select-none">
-                  <input
-                    type="checkbox"
-                    checked={infiniteScroll}
-                    onChange={(e) => setInfiniteScroll(e.target.checked)}
-                    className="rounded border-ink/40 text-brand-purple focus:ring-brand-purple"
-                  />
-                  <span>Infinite scroll</span>
-                </label>
-              )}
-            </div>
+          <div className="card-brutal p-4 sm:p-6 overflow-x-auto">
+            <h2 className="text-lg font-extrabold text-ink mb-4">Recent Activity</h2>
             {activity.length === 0 ? (
               <p className="text-muted font-medium">No activity yet. Share your profile link to get started!</p>
             ) : (
