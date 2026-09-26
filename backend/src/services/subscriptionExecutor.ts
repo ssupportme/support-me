@@ -170,6 +170,7 @@ export class SubscriptionExecutor {
           lastChargeTxHash: hash,
           lastChargedAt: new Date(),
           lastError: null,
+          failureCount: 0,
           failureNotifiedAt: null,
         },
       });
@@ -202,6 +203,12 @@ export class SubscriptionExecutor {
   }
 
   private async recordFailure(subscription: Subscription, message: string): Promise<void> {
+    const isPermanent = message.includes("failed on-chain") || message.includes("reverted");
+    const currentFailureCount = (subscription as any).failureCount || 0;
+    const failureCount = currentFailureCount + 1;
+    const maxAttempts = isPermanent ? 3 : 24; // bounded attempts
+    const shouldDeactivate = failureCount >= maxAttempts;
+
     log("error", "SubscriptionExecutor charge failed", {
       subscriptionId: subscription.id,
       creatorId: subscription.creatorId,
@@ -209,6 +216,9 @@ export class SubscriptionExecutor {
       amount: subscription.amount,
       token: subscription.token,
       error: message,
+      isPermanent,
+      failureCount,
+      shouldDeactivate,
     });
 
     // Report to Sentry with full context for debugging
@@ -242,13 +252,16 @@ export class SubscriptionExecutor {
       }
     }
 
-    // Record the failure but leave `active`/`nextChargeAt` untouched — a
-    // transient RPC error should retry next tick, and a permanent one
-    // (e.g. revoked allowance) surfaces via `lastError` for the supporter
-    // to see rather than the executor looping forever.
+    // Record the failure and increment failureCount. If the streak exceeds
+    // maxAttempts, mark active = false so we stop retrying forever.
     await prisma.subscription.update({
       where: { id: subscription.id },
-      data: { lastError: message, ...(notified ? { failureNotifiedAt: new Date() } : {}) },
+      data: { 
+        lastError: message, 
+        failureCount,
+        ...(shouldDeactivate ? { active: false } : {}),
+        ...(notified ? { failureNotifiedAt: new Date() } : {}) 
+      },
     });
   }
 

@@ -25,7 +25,7 @@ router.get(
     const { page, limit } = req.query as unknown as { page: number; limit: number };
 
     // Run the independent aggregates concurrently.
-    const [totalSignups, totalCreators, totalByCurrency, perCreatorByCurrency, users] =
+    const [totalSignups, totalCreators, totalByCurrency, perCreatorByCurrency, users, failingSubscriptions] =
       await Promise.all([
         prisma.user.count(),
         prisma.creator.count(),
@@ -48,6 +48,13 @@ router.get(
           include: { creator: true },
           skip: (page - 1) * limit,
           take: limit,
+        }),
+        // Surface long-failing subscriptions for admin visibility
+        prisma.subscription.findMany({
+          where: { failureCount: { gt: 0 } },
+          include: { creator: true },
+          orderBy: { failureCount: "desc" },
+          take: 50,
         }),
       ]);
 
@@ -86,6 +93,7 @@ router.get(
       totalSignups,
       totalCreators,
       earningsByCurrency,
+      failingSubscriptions,
       users: userRows,
       pagination: {
         page,
