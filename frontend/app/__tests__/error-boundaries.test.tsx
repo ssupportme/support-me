@@ -4,14 +4,7 @@ import * as Sentry from '@sentry/nextjs';
 import RouteError from '@/app/error';
 import GlobalError from '@/app/global-error';
 
-const scope = {
-  setLevel: vi.fn(),
-  setTag: vi.fn(),
-  setContext: vi.fn(),
-};
-
 vi.mock('@sentry/nextjs', () => ({
-  withScope: vi.fn((cb: (s: typeof scope) => unknown) => cb(scope)),
   captureException: vi.fn(() => 'evt-123'),
 }));
 
@@ -44,13 +37,25 @@ describe('RouteError (app/error.tsx)', () => {
     const error = makeError();
     render(<RouteError error={error} reset={vi.fn()} />);
 
-    expect(Sentry.captureException).toHaveBeenCalledWith(error);
-    expect(scope.setTag).toHaveBeenCalledWith('error_boundary', 'route');
-    expect(scope.setTag).toHaveBeenCalledWith('route', '/app/settings');
-    expect(scope.setTag).toHaveBeenCalledWith('digest', 'abc123');
-    expect(scope.setContext).toHaveBeenCalledWith(
-      'error_boundary',
-      expect.objectContaining({ route: '/app/settings', digest: 'abc123' }),
+    // The boundary metadata rides along in the typed capture context, which
+    // Sentry applies to the event exactly as the old scope mutations did.
+    expect(Sentry.captureException).toHaveBeenCalledWith(
+      error,
+      expect.objectContaining({
+        level: 'error',
+        tags: expect.objectContaining({
+          error_boundary: 'route',
+          route: '/app/settings',
+          digest: 'abc123',
+        }),
+        contexts: {
+          error_boundary: expect.objectContaining({
+            boundary: 'route',
+            route: '/app/settings',
+            digest: 'abc123',
+          }),
+        },
+      }),
     );
   });
 
@@ -80,9 +85,13 @@ describe('GlobalError (app/global-error.tsx)', () => {
     consoleError.mockRestore();
 
     expect(screen.getByRole('heading', { name: /something went wrong/i })).toBeInTheDocument();
-    expect(Sentry.captureException).toHaveBeenCalledWith(error);
-    expect(scope.setLevel).toHaveBeenCalledWith('fatal');
-    expect(scope.setTag).toHaveBeenCalledWith('error_boundary', 'global');
+    expect(Sentry.captureException).toHaveBeenCalledWith(
+      error,
+      expect.objectContaining({
+        level: 'fatal',
+        tags: expect.objectContaining({ error_boundary: 'global' }),
+      }),
+    );
 
     fireEvent.click(screen.getByRole('button', { name: /try again/i }));
     expect(reset).toHaveBeenCalled();

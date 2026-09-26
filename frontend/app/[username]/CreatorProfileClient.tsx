@@ -5,7 +5,7 @@ import Image from 'next/image';
 import * as StellarSdk from '@stellar/stellar-sdk';
 import { notify } from '@/lib/notify';
 import { HugeiconsIcon } from '@hugeicons/react';
-import { PartyIcon, TwitterLogoIcon, LinkIcon } from '@hugeicons/core-free-icons';
+import { PartyIcon, TwitterIcon, LinkIcon } from '@hugeicons/core-free-icons';
 import { connectWallet } from '@/lib/wallet';
 import {
   categorizeWalletError,
@@ -561,7 +561,7 @@ export default function CreatorProfileClient({ params }: { params: Promise<{ use
               className="btn-brutal btn-brutal-white px-3 py-2 text-sm flex items-center gap-2"
               aria-label="Share on X/Twitter"
             >
-              <HugeiconsIcon icon={TwitterLogoIcon} size={18} strokeWidth={2} />
+              <HugeiconsIcon icon={TwitterIcon} size={18} strokeWidth={2} />
               Share
             </button>
             <button
@@ -645,7 +645,7 @@ export default function CreatorProfileClient({ params }: { params: Promise<{ use
             <button
               onClick={handleConnectWallet}
               disabled={connecting}
-              className="btn-brutal btn-brutal-primary w-full"
+              className="btn-brutal btn-brutal-primary w-full min-h-[48px]"
             >
               {connecting ? 'Connecting…' : 'Connect Wallet'}
             </button>
@@ -672,7 +672,7 @@ export default function CreatorProfileClient({ params }: { params: Promise<{ use
                           }
                         }}
                         aria-pressed={assetCode === code}
-                        className={`btn-brutal text-sm px-0 py-2 ${
+                        className={`btn-brutal text-sm px-0 py-2 min-h-[44px] ${
                           assetCode === code ? 'btn-brutal-primary' : 'btn-brutal-white'
                         }`}
                       >
@@ -715,7 +715,7 @@ export default function CreatorProfileClient({ params }: { params: Promise<{ use
                         <button
                           key={preset}
                           onClick={() => setDonationAmount(preset)}
-                          className={`btn-brutal text-sm px-0 py-2 ${
+                          className={`btn-brutal text-sm px-0 py-2 min-h-[44px] ${
                             donationAmount === preset ? 'btn-brutal-primary' : 'btn-brutal-white'
                           }`}
                         >
@@ -756,7 +756,7 @@ export default function CreatorProfileClient({ params }: { params: Promise<{ use
                           <select
                             value={intervalChoice}
                             onChange={(e) => setIntervalChoice(e.target.value as typeof intervalChoice)}
-                            className="input-brutal text-sm py-1.5 w-auto"
+                            className="input-brutal text-sm py-1.5 w-auto min-h-[44px]"
                           >
                             <option value="7">Weekly</option>
                             <option value="30">Monthly</option>
@@ -772,7 +772,7 @@ export default function CreatorProfileClient({ params }: { params: Promise<{ use
                               onChange={(e) => setCustomDays(e.target.value)}
                               aria-label="Days between charges"
                               title={`Up to ${MAX_CHARGE_INTERVAL_DAYS} days`}
-                              className="input-brutal text-sm py-1.5 w-14"
+                              className="input-brutal text-sm py-1.5 w-14 min-h-[44px]"
                             />
                           )}
                         </div>

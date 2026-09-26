@@ -7,6 +7,7 @@ import { HugeiconsIcon } from '@hugeicons/react';
 import {
   GridViewIcon,
   DashboardSquare01Icon,
+  Search01Icon,
   Settings01Icon,
   RepeatIcon,
   Activity01Icon,
@@ -16,17 +17,32 @@ import {
 import { WalletMenu } from '@/components/WalletMenu';
 import { ThemeToggle } from '@/components/ThemeToggle';
 
-const LINKS = [
+/**
+ * The three destinations that stay in the desktop top nav. Everything else
+ * lives in the wallet menu (#151) so the nav stops competing with page
+ * content for horizontal space on smaller laptop screens.
+ */
+const PRIMARY_LINKS = [
   { href: '/app', label: 'App', icon: GridViewIcon },
   { href: '/dashboard', label: 'Dashboard', icon: DashboardSquare01Icon },
   { href: '/discover', label: 'Discover', icon: Search01Icon },
+];
+
+/** Secondary destinations, reached through the wallet menu. */
+const SECONDARY_LINKS = [
   { href: '/app/subscriptions', label: 'Subscriptions', icon: RepeatIcon },
   { href: '/activity', label: 'Activity', icon: Activity01Icon },
   { href: '/settings', label: 'Settings', icon: Settings01Icon },
 ];
 
 /**
- * Shared navigation for the authenticated app shell (/app, /dashboard,
+ * Mobile keeps its full list: the drawer is a full-screen-feeling surface with
+ * room to spare, and the bottom tab bar already covers the frequent routes, so
+ * hiding anything there would only make it harder to reach.
+ */
+const ALL_LINKS = [...PRIMARY_LINKS, ...SECONDARY_LINKS];
+
+/** Shared navigation for the authenticated app shell (/app, /dashboard,
  * /settings, /activity). Highlights the active route and exposes mobile navigation
  * toggle and wallet chip + sign-out via <WalletMenu>.
  */
@@ -34,7 +50,7 @@ export function AppNav() {
   const pathname = usePathname();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
-  const primaryMobileLinks = LINKS.filter((link) =>
+  const primaryMobileLinks = ALL_LINKS.filter((link) =>
     ['/app', '/dashboard', '/discover', '/activity'].includes(link.href)
   );
 
@@ -60,8 +76,8 @@ export function AppNav() {
             </Link>
           </div>
 
-          <div className="hidden sm:flex items-center gap-6">
-            {LINKS.map((link) => {
+          <div data-testid="primary-nav" className="hidden sm:flex items-center gap-6">
+            {PRIMARY_LINKS.map((link) => {
               const active = pathname === link.href;
               return (
                 <Link
@@ -88,7 +104,7 @@ export function AppNav() {
         {/* Mobile Drawer / Dropdown Menu */}
         {mobileMenuOpen && (
           <div data-testid="mobile-menu" className="sm:hidden border-t-4 border-ink bg-background px-4 py-4 space-y-2 pb-20">
-            {LINKS.map((link) => {
+            {ALL_LINKS.map((link) => {
               const active = pathname === link.href;
               return (
                 <Link
@@ -132,6 +148,5 @@ export function AppNav() {
         })}
       </nav>
     </>
-  );
   );
 }
