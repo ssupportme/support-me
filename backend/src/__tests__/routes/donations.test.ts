@@ -14,6 +14,7 @@ jest.mock("../../prisma", () => ({
       upsert: jest.fn(),
     },
     donationIdempotencyKey: {
+      findMany: jest.fn(),
       deleteMany: jest.fn(),
       findUnique: jest.fn(),
       delete: jest.fn(),
@@ -41,6 +42,7 @@ const mockedPrisma = prisma as unknown as {
   user: { findUnique: jest.Mock };
   donation: { findMany: jest.Mock; count: jest.Mock; create: jest.Mock; upsert: jest.Mock };
   donationIdempotencyKey: {
+    findMany: jest.Mock;
     deleteMany: jest.Mock;
     findUnique: jest.Mock;
     delete: jest.Mock;
@@ -58,6 +60,7 @@ beforeEach(() => {
     callback(mockedPrisma)
   );
   mockedPrisma.donation.count.mockResolvedValue(0);
+  mockedPrisma.donationIdempotencyKey.findMany.mockResolvedValue([]);
   mockedPrisma.donationIdempotencyKey.findUnique.mockResolvedValue(null);
   // Default: the second creator.findUnique call inside notifyDonationReceived
   // (keyed by id, with the user relation included) finds nothing, and the

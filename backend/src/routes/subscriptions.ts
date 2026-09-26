@@ -25,7 +25,7 @@ router.get(
 
     // Require explicit ownership: caller must be requesting their own subscriptions
     // or be the creator viewing subscribers.
-    let targetSupporterAddress = supporterAddress;
+    let targetSupporterAddress: string | null | undefined = supporterAddress;
 
     if (targetSupporterAddress && targetSupporterAddress !== req.user.walletAddress) {
       // Check if the caller is the target creator

@@ -7,8 +7,15 @@ import { createDonationSchema, listDonationsQuerySchema } from "../schemas/donat
 import { notifyDonationConfirmation, notifyDonationReceived } from "../services/donationNotifications";
 import { applyDonationToGoals } from "../services/goalService";
 import { BadRequestError, NotFoundError } from "../errors/AppError";
+import { RateLimiter } from "../services/rateLimiter";
+import { clientIp, rateLimit } from "../middleware/rateLimit";
 
 const router = Router();
+
+// Donation creation does at least one database query per request, so it is
+// limited per IP and per sender wallet before any of that work happens.
+export const donationIpLimiter = new RateLimiter(60, 60 * 1000);
+export const donationSenderLimiter = new RateLimiter(20, 60 * 1000);
 
 router.get(
   "/",
@@ -51,7 +58,9 @@ router.get(
 
 router.post(
   "/",
+  rateLimit(donationIpLimiter, clientIp, "donation"),
   validate({ body: createDonationSchema }),
+  rateLimit(donationSenderLimiter, (req) => req.body.senderAddress, "donation"),
   asyncHandler(async (req, res) => {
     const idempotencyKey = req.header("Idempotency-Key")?.trim();
     if (!idempotencyKey) throw new BadRequestError("Idempotency-Key header is required");
@@ -82,6 +91,7 @@ router.post(
     // not on every retry a client makes with the same Idempotency-Key.
     let isNewDonation = false;
 
+    const record = async (client: Prisma.TransactionClient): Promise<Donation> => {
       // Cap per-request cleanup to a small batch size to avoid unbounded write load/lock contention
       const expiredKeys = await client.donationIdempotencyKey.findMany({
         where: { expiresAt: { lt: new Date() } },
