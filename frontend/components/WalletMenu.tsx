@@ -61,6 +61,7 @@ export function WalletMenu() {
     <div className="relative" ref={ref}>
       <button
         onClick={() => setOpen((v) => !v)}
+        aria-label="Wallet menu"
         aria-haspopup="menu"
         aria-expanded={open}
         className="btn-brutal btn-brutal-white text-sm sm:text-base font-mono gap-1.5 min-h-[44px] flex items-center justify-center"

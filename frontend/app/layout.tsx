@@ -64,6 +64,12 @@ export default function RootLayout({
         className={`${geistSans.variable} ${geistMono.variable} ${spaceGrotesk.variable} antialiased`}
       >
         <script dangerouslySetInnerHTML={{ __html: THEME_INIT_SCRIPT }} />
+        <a
+          href="#main-content"
+          className="sr-only focus:not-sr-only focus:fixed focus:top-4 focus:left-4 focus:z-[100] focus:px-4 focus:py-2 focus:bg-brand-yellow focus:text-ink focus:font-extrabold focus:border-2 focus:border-ink focus:shadow-brutal focus:rounded-lg"
+        >
+          Skip to main content
+        </a>
         <OfflineBanner />
         <ThemeProvider>
           <AuthProvider>

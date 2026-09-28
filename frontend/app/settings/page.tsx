@@ -334,7 +334,7 @@ export default function SettingsPage() {
     <ProtectedRoute>
       <div className="min-h-screen bg-background">
         <AppNav />
-        <div className="max-w-2xl mx-auto px-4 sm:px-6 lg:px-8 py-10">
+        <main id="main-content" className="max-w-2xl mx-auto px-4 sm:px-6 lg:px-8 py-10">
           <h1 className="text-3xl font-extrabold text-ink mb-8 tracking-tight">Settings</h1>
 
           <div className="card-brutal p-8 space-y-8">
@@ -691,7 +691,7 @@ export default function SettingsPage() {
           <div className="mt-8">
             <QrCodeCard creator={creator} />
           </div>
-        </div>
+        </main>
       </div>
     </ProtectedRoute>
   );

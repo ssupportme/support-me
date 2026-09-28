@@ -121,6 +121,7 @@ export default function Home() {
     <div className="min-h-screen bg-background">
       {/* Navigation */}
       <nav
+        aria-label="Main Navigation"
         style={{ top: 'var(--offline-banner-h, 0px)' }}
         className="sticky w-full z-50 bg-background border-b-4 border-ink"
       >
@@ -158,8 +159,9 @@ export default function Home() {
         Running on Stellar Testnet — no real funds are used. This is a demo.
       </div>
 
-      {/* Hero Section */}
-      <section className="pt-20 pb-20 px-4 sm:px-6 lg:px-8">
+      <main id="main-content">
+        {/* Hero Section */}
+        <section className="pt-20 pb-20 px-4 sm:px-6 lg:px-8">
         <div className="max-w-5xl mx-auto grid lg:grid-cols-2 gap-8 items-center">
           {/* Left: copy + CTAs */}
           <div className="text-center lg:text-left">
@@ -314,6 +316,7 @@ export default function Home() {
           )}
         </div>
       </section>
+      </main>
 
       {/* Footer */}
       <footer className="py-12 px-4 sm:px-6 lg:px-8 bg-ink text-background border-t-4 border-ink">
@@ -343,16 +346,16 @@ export default function Home() {
                     GitHub
                   </a>
                 </li>
-                <li className="text-background/40 cursor-default">Documentation (soon)</li>
-                <li className="text-background/40 cursor-default">Discord (soon)</li>
+                <li className="text-background/70 cursor-default">Documentation (soon)</li>
+                <li className="text-background/70 cursor-default">Discord (soon)</li>
               </ul>
             </div>
             <div>
               <h4 className="text-background font-extrabold mb-4">Legal</h4>
               <ul className="space-y-2 text-sm text-background/70 font-medium">
-                <li className="text-background/40 cursor-default">Privacy (soon)</li>
-                <li className="text-background/40 cursor-default">Terms (soon)</li>
-                <li className="text-background/40 cursor-default">Contact (soon)</li>
+                <li className="text-background/70 cursor-default">Privacy (soon)</li>
+                <li className="text-background/70 cursor-default">Terms (soon)</li>
+                <li className="text-background/70 cursor-default">Contact (soon)</li>
               </ul>
             </div>
           </div>

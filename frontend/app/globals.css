@@ -25,6 +25,7 @@
   --accent-bg: #ede9fe;  /* soft violet wash for panels */
   --input-bg: #ffffff;
   --shadow-color: #0a0a0a;
+  --focus-ring: #7c3aed;
 }
 
 .dark {
@@ -36,6 +37,7 @@
   --accent-bg: #2b2440;  /* deep violet wash */
   --input-bg: #161412;
   --shadow-color: #000000;
+  --focus-ring: #c4b5fd;
 }
 
 @theme inline {
@@ -149,6 +151,23 @@ input[type="number"] {
   .input-brutal:focus {
     box-shadow: var(--shadow-brutal-sm);
   }
+}
+
+/* Accessible focus indicators (WCAG 2.4.7 / 2.4.11) */
+:focus-visible {
+  outline: 3px solid var(--focus-ring);
+  outline-offset: 2px;
+}
+
+.btn-brutal:focus-visible {
+  outline: 3px solid var(--focus-ring);
+  outline-offset: 3px;
+}
+
+.input-brutal:focus-visible {
+  outline: 3px solid var(--focus-ring);
+  outline-offset: 2px;
+  box-shadow: var(--shadow-brutal-sm);
 }
 
 /* Tip jar animations (used by <TipJar>). Kept in global CSS rather than

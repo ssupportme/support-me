@@ -542,7 +542,7 @@ function CreatorProfileView({ username, locale, onLocaleChange }: CreatorProfile
 
   return (
     <div className="min-h-screen bg-background py-10 px-4">
-      <div className="max-w-md mx-auto space-y-6">
+      <main id="main-content" className="max-w-md mx-auto space-y-6">
         {/* Creator header */}
         <div className="card-brutal p-8 text-center">
           <div className="w-24 h-24 mx-auto mb-4 rounded-full border-4 border-ink overflow-hidden bg-accent-bg flex items-center justify-center">
@@ -754,6 +754,7 @@ function CreatorProfileView({ username, locale, onLocaleChange }: CreatorProfile
                         <button
                           key={preset}
                           onClick={() => setDonationAmount(preset)}
+                          aria-pressed={donationAmount === preset}
                           className={`btn-brutal text-sm px-0 py-2 min-h-[44px] ${
                             donationAmount === preset ? 'btn-brutal-primary' : 'btn-brutal-white'
                           }`}
@@ -846,7 +847,7 @@ function CreatorProfileView({ username, locale, onLocaleChange }: CreatorProfile
             </div>
           )}
         </div>
-      </div>
+      </main>
     </div>
   );
 }
