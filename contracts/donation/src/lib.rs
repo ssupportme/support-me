@@ -1459,4 +1459,281 @@ mod tests {
             &0,
         );
     }
+
+    // =========================================================================
+    // Property-Based & Invariant Fuzz Tests (#46)
+    // =========================================================================
+
+    #[test]
+    fn property_test_total_donations_equals_sum_of_individual_donations() {
+        let env = Env::default();
+        env.mock_all_auths_allowing_non_root_auth();
+        let (admin, donation_client, registry_client) = setup(&env);
+
+        let donor = Address::generate(&env);
+        let creator = Address::generate(&env);
+        let token_address = create_token_contract(&env, &admin);
+        donation_client.add_allowed_token(&token_address);
+        donation_client.register_creator(&creator, &String::from_bytes(&env, b"prop_creator"));
+
+        // Multi-batch donation sequences
+        let sequences: [&[i128]; 4] = [
+            &[100, 250, 50, 1000, 5],
+            &[1, 1, 1, 1, 1, 1, 1, 1, 1, 1],
+            &[500_000, 250_000, 1_000_000],
+            &[10, 20, 30, 40, 50, 60, 70, 80, 90, 100],
+        ];
+
+        let mut cumulative_sum = 0i128;
+        let mut cumulative_count = 0u32;
+
+        for seq in sequences {
+            let needed: i128 = seq.iter().sum();
+            StellarAssetClient::new(&env, &token_address).mint(&donor, &needed);
+
+            for &amount in seq {
+                let record = donation_client.donate(
+                    &donor,
+                    &creator,
+                    &token_address,
+                    &amount,
+                    &String::from_bytes(&env, b"fuzz"),
+                );
+                assert_eq!(record.amount, amount);
+                cumulative_sum += amount;
+                cumulative_count += 1;
+
+                let stats = registry_client.get_creator(&creator).unwrap();
+                assert_eq!(stats.total_donations, cumulative_sum);
+                assert_eq!(stats.donation_count, cumulative_count);
+            }
+        }
+    }
+
+    #[test]
+    fn property_test_token_balance_conservation_invariant() {
+        let env = Env::default();
+        env.mock_all_auths_allowing_non_root_auth();
+        let (admin, donation_client, _registry_client) = setup(&env);
+
+        let donor = Address::generate(&env);
+        let creator = Address::generate(&env);
+        let token_address = create_token_contract(&env, &admin);
+        donation_client.add_allowed_token(&token_address);
+
+        let amounts = [42i128, 999, 15_000, 1, 750];
+        let total: i128 = amounts.iter().sum();
+        let initial_donor_balance = total + 5_000;
+
+        StellarAssetClient::new(&env, &token_address).mint(&donor, &initial_donor_balance);
+        let token_client = token::Client::new(&env, &token_address);
+
+        assert_eq!(token_client.balance(&donor), initial_donor_balance);
+        assert_eq!(token_client.balance(&creator), 0);
+        assert_eq!(token_client.balance(&donation_client.address), 0);
+
+        let mut donated_so_far = 0i128;
+        for &amt in &amounts {
+            let record = donation_client.donate(
+                &donor,
+                &creator,
+                &token_address,
+                &amt,
+                &String::from_bytes(&env, b"conservation"),
+            );
+            donated_so_far += amt;
+
+            // Invariant 1: Fee never exceeds donation amount
+            assert!(record.fee_amount <= record.amount);
+            // Invariant 2: Gross donation amount is conserved
+            let creator_received = record.amount - record.fee_amount;
+            assert_eq!(creator_received + record.fee_amount, record.amount);
+
+            // Invariant 3: Balances update exactly by transferred amount
+            assert_eq!(token_client.balance(&donor), initial_donor_balance - donated_so_far);
+            assert_eq!(token_client.balance(&creator), donated_so_far);
+            // Invariant 4: No funds trapped in contract
+            assert_eq!(token_client.balance(&donation_client.address), 0);
+        }
+    }
+
+    #[test]
+    fn property_test_unauthorized_callers_cannot_modify_config() {
+        let env = Env::default();
+        let (_admin, donation_client, _registry_client) = setup(&env);
+
+        let _unauthorized_caller = Address::generate(&env);
+        let random_token = Address::generate(&env);
+        let random_executor = Address::generate(&env);
+
+        // Without mock_all_auths on the unauthorized caller, privileged calls must fail
+        assert!(std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            donation_client.add_allowed_token(&random_token);
+        })).is_err());
+
+        assert!(std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            donation_client.set_executor(&random_executor);
+        })).is_err());
+
+        assert!(std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            donation_client.set_paused(&true);
+        })).is_err());
+    }
+
+    #[test]
+    fn property_test_edge_cases_and_boundary_rejection() {
+        let env = Env::default();
+        env.mock_all_auths_allowing_non_root_auth();
+        let (admin, donation_client, _registry_client) = setup(&env);
+
+        let donor = Address::generate(&env);
+        let creator = Address::generate(&env);
+        let token_address = create_token_contract(&env, &admin);
+        donation_client.add_allowed_token(&token_address);
+        StellarAssetClient::new(&env, &token_address).mint(&donor, &1_000_000);
+
+        // 1. Amount == 0 must panic
+        assert!(std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            donation_client.donate(
+                &donor,
+                &creator,
+                &token_address,
+                &0,
+                &String::from_bytes(&env, b"zero"),
+            );
+        })).is_err());
+
+        // 2. Negative amount must panic
+        assert!(std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            donation_client.donate(
+                &donor,
+                &creator,
+                &token_address,
+                &-500,
+                &String::from_bytes(&env, b"negative"),
+            );
+        })).is_err());
+
+        // 3. Memo exceeding MAX_MEMO_LENGTH (140 bytes) must panic
+        let long_memo_bytes = [b'a'; 141];
+        assert!(std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            donation_client.donate(
+                &donor,
+                &creator,
+                &token_address,
+                &100,
+                &String::from_bytes(&env, &long_memo_bytes),
+            );
+        })).is_err());
+
+        // 4. Exactly 140 bytes memo must succeed
+        let max_valid_memo = [b'b'; 140];
+        let ok_record = donation_client.donate(
+            &donor,
+            &creator,
+            &token_address,
+            &100,
+            &String::from_bytes(&env, &max_valid_memo),
+        );
+        assert_eq!(ok_record.amount, 100);
+
+        // 5. Non-allowed token must panic
+        let unallowed_token = Address::generate(&env);
+        assert!(std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            donation_client.donate(
+                &donor,
+                &creator,
+                &unallowed_token,
+                &100,
+                &String::from_bytes(&env, b"unallowed"),
+            );
+        })).is_err());
+    }
+
+    use proptest::prelude::*;
+
+    proptest! {
+        #![proptest_config(ProptestConfig::with_cases(15))]
+
+        #[test]
+        fn proptest_arbitrary_donation_amounts_invariant(
+            amount1 in 1i128..10_000,
+            amount2 in 1i128..10_000,
+            amount3 in 1i128..10_000
+        ) {
+            let env = Env::default();
+            env.mock_all_auths_allowing_non_root_auth();
+            let (admin, donation_client, registry_client) = setup(&env);
+
+            let donor = Address::generate(&env);
+            let creator = Address::generate(&env);
+            let token_address = create_token_contract(&env, &admin);
+            donation_client.add_allowed_token(&token_address);
+            donation_client.register_creator(&creator, &String::from_bytes(&env, b"proptest_creator"));
+
+            let total_donation = amount1 + amount2 + amount3;
+            StellarAssetClient::new(&env, &token_address).mint(&donor, &(total_donation + 500));
+
+            for amt in [amount1, amount2, amount3] {
+                let rec = donation_client.donate(
+                    &donor,
+                    &creator,
+                    &token_address,
+                    &amt,
+                    &String::from_bytes(&env, b"prop"),
+                );
+                prop_assert_eq!(rec.amount, amt);
+                prop_assert!(rec.fee_amount <= rec.amount);
+            }
+
+            let profile = registry_client.get_creator(&creator).unwrap();
+            prop_assert_eq!(profile.total_donations, total_donation);
+            prop_assert_eq!(profile.donation_count, 3);
+        }
+
+        #[test]
+        fn proptest_subscription_charge_schedule_invariant(
+            interval in 100u64..100_000,
+            offset in 1u64..99
+        ) {
+            let env = Env::default();
+            env.mock_all_auths_allowing_non_root_auth();
+            let (admin, donation_client, _registry_client) = setup(&env);
+
+            let supporter = Address::generate(&env);
+            let creator = Address::generate(&env);
+            let executor = Address::generate(&env);
+            let token_address = create_token_contract(&env, &admin);
+
+            donation_client.add_allowed_token(&token_address);
+            donation_client.set_executor(&executor);
+
+            StellarAssetClient::new(&env, &token_address).mint(&supporter, &100_000);
+            let token_client = token::Client::new(&env, &token_address);
+            token_client.approve(&supporter, &donation_client.address, &100_000, &1000);
+
+            env.ledger().with_mut(|li| {
+                li.sequence_number = 100;
+                li.timestamp = 1_000;
+            });
+
+            let sub_id = donation_client.subscribe(
+                &supporter,
+                &creator,
+                &token_address,
+                &50,
+                &interval,
+            );
+
+            // Time is strictly before next_charge_at (1_000 + offset < 1_000 + interval)
+            env.ledger().with_mut(|li| {
+                li.timestamp = 1_000 + offset;
+            });
+
+            // Charging prematurely must fail with error
+            let premature_charge = donation_client.try_charge_subscription(&executor, &sub_id);
+            prop_assert!(premature_charge.is_err());
+        }
+    }
 }
+

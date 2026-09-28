@@ -20,6 +20,7 @@ soroban-sdk = { workspace = true, features = ["testutils"] }
 # ever talk to each other through `env.invoke_contract`, exactly like two
 # independently deployed contracts on-chain.
 creator-registry = { path = "../creator-registry" }
+proptest = { version = "1.6", default-features = false, features = ["std"] }
 
 [profile.release]
 opt-level = "z"
