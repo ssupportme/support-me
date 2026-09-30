@@ -42,6 +42,8 @@ const SUBSCRIPTIONS_KEY: Symbol = symbol_short!("subs");
 const SUB_COUNTER: Symbol = symbol_short!("sub_ctr");
 const EXECUTOR_KEY: Symbol = symbol_short!("executor");
 const ALLOWED_TOKEN_KEY: Symbol = symbol_short!("allowed");
+const MIN_DONATION_KEY: Symbol = symbol_short!("min_don");
+const MAX_DONATION_KEY: Symbol = symbol_short!("max_don");
 pub const MAX_MEMO_LENGTH: u32 = 140;
 
 /// Emitted whenever a donation is settled on-chain.
@@ -130,6 +132,14 @@ pub struct GoalUpdatedEvent {
 pub enum ChargeError {
     InsufficientAllowance = 1,
     InsufficientBalance = 2,
+}
+
+#[contracterror]
+#[derive(Copy, Clone, Debug, Eq, PartialEq, PartialOrd, Ord)]
+#[repr(u32)]
+pub enum DonationError {
+    AmountTooLow = 10,
+    AmountTooHigh = 11,
 }
 
 #[contractevent(topics = ["sub_failed"])]
@@ -415,6 +425,40 @@ impl DonationContract {
         env.storage().instance().has(&(ALLOWED_TOKEN_KEY, token))
     }
 
+    /// Admin-gated: sets the minimum donation amount guardrail (0 to disable).
+    pub fn set_min_donation(env: Env, min_amount: i128) {
+        assert!(min_amount >= 0, "minimum donation must be non-negative");
+        let admin: Address = env
+            .storage()
+            .instance()
+            .get(&ADMIN_KEY)
+            .expect("donation contract not initialized: call initialize() first");
+        admin.require_auth();
+        env.storage().instance().set(&MIN_DONATION_KEY, &min_amount);
+    }
+
+    /// Returns the currently configured minimum donation amount (0 if unconstrained).
+    pub fn get_min_donation(env: Env) -> i128 {
+        env.storage().instance().get(&MIN_DONATION_KEY).unwrap_or(0)
+    }
+
+    /// Admin-gated: sets the sanity-check maximum donation amount guardrail (0 to disable).
+    pub fn set_max_donation(env: Env, max_amount: i128) {
+        assert!(max_amount >= 0, "maximum donation must be non-negative");
+        let admin: Address = env
+            .storage()
+            .instance()
+            .get(&ADMIN_KEY)
+            .expect("donation contract not initialized: call initialize() first");
+        admin.require_auth();
+        env.storage().instance().set(&MAX_DONATION_KEY, &max_amount);
+    }
+
+    /// Returns the currently configured maximum donation amount (0 if unconstrained).
+    pub fn get_max_donation(env: Env) -> i128 {
+        env.storage().instance().get(&MAX_DONATION_KEY).unwrap_or(0)
+    }
+
     /// Transfer `amount` of `token` from `donor` to `creator`, record the
     /// donation locally, and notify the CreatorRegistry (cross-contract) so
     /// the creator's lifetime stats stay in sync.
@@ -434,6 +478,17 @@ impl DonationContract {
         assert!(!Self::is_paused(env.clone()), "contract is currently paused");
         donor.require_auth();
         assert!(amount > 0, "Donation amount must be positive");
+
+        let min_amount: i128 = env.storage().instance().get(&MIN_DONATION_KEY).unwrap_or(0);
+        if min_amount > 0 && amount < min_amount {
+            soroban_sdk::panic_with_error!(&env, DonationError::AmountTooLow);
+        }
+
+        let max_amount: i128 = env.storage().instance().get(&MAX_DONATION_KEY).unwrap_or(0);
+        if max_amount > 0 && amount > max_amount {
+            soroban_sdk::panic_with_error!(&env, DonationError::AmountTooHigh);
+        }
+
         assert!(
             memo.len() <= MAX_MEMO_LENGTH,
             "Donation memo exceeds maximum length"
