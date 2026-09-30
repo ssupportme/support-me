@@ -3,7 +3,9 @@
 import { WALLET_INSTALL_LINKS } from '@/lib/walletErrors';
 
 export interface WalletConnectErrorData {
-  type: string;
+  // Optional: unused by this component itself, kept for callers (e.g.
+  // categorizeWalletError) that tag their own error variants by type.
+  type?: string;
   title: string;
   message: string;
   action?: string;

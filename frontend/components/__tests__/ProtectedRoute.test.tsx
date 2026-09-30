@@ -14,14 +14,25 @@ describe('ProtectedRoute', () => {
     mockUseAuth.mockReset();
   });
 
-  it('shows a loading state while auth is initializing', () => {
-    mockUseAuth.mockReturnValue({
+  // ProtectedRoute's unauthenticated state renders AuthMethods, which reads
+  // all four sign-in methods off useAuth() - not just loginWithWallet.
+  function authMock(overrides: Partial<ReturnType<typeof useAuth>> = {}) {
+    return {
       user: null,
       token: null,
-      loading: true,
+      loading: false,
       loginWithWallet: vi.fn(),
+      getTwitterRedirectUrl: vi.fn(),
+      completeTwitterLogin: vi.fn(),
+      requestMagicLink: vi.fn(),
+      verifyMagicLink: vi.fn(),
       logout: vi.fn(),
-    });
+      ...overrides,
+    };
+  }
+
+  it('shows a loading state while auth is initializing', () => {
+    mockUseAuth.mockReturnValue(authMock({ loading: true }));
 
     render(
       <ProtectedRoute>
@@ -33,14 +44,8 @@ describe('ProtectedRoute', () => {
     expect(screen.queryByText('Secret content')).not.toBeInTheDocument();
   });
 
-  it('prompts to connect a wallet when there is no user', () => {
-    mockUseAuth.mockReturnValue({
-      user: null,
-      token: null,
-      loading: false,
-      loginWithWallet: vi.fn(),
-      logout: vi.fn(),
-    });
+  it('prompts to sign in when there is no user', () => {
+    mockUseAuth.mockReturnValue(authMock());
 
     render(
       <ProtectedRoute>
@@ -48,19 +53,16 @@ describe('ProtectedRoute', () => {
       </ProtectedRoute>
     );
 
-    expect(screen.getByText('Connect Your Wallet')).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Sign In' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /connect wallet/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /sign in with twitter/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /email me a sign-in link/i })).toBeInTheDocument();
     expect(screen.queryByText('Secret content')).not.toBeInTheDocument();
   });
 
   it('calls loginWithWallet when the connect button is clicked', async () => {
     const loginWithWallet = vi.fn().mockResolvedValue({});
-    mockUseAuth.mockReturnValue({
-      user: null,
-      token: null,
-      loading: false,
-      loginWithWallet,
-      logout: vi.fn(),
-    });
+    mockUseAuth.mockReturnValue(authMock({ loginWithWallet }));
 
     render(
       <ProtectedRoute>
@@ -74,13 +76,7 @@ describe('ProtectedRoute', () => {
   });
 
   it('renders children when a user is authenticated', () => {
-    mockUseAuth.mockReturnValue({
-      user: { id: 1, walletAddress: 'GABC' },
-      token: 'jwt',
-      loading: false,
-      loginWithWallet: vi.fn(),
-      logout: vi.fn(),
-    });
+    mockUseAuth.mockReturnValue(authMock({ user: { id: 1, walletAddress: 'GABC' }, token: 'jwt' }));
 
     render(
       <ProtectedRoute>

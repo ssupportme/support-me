@@ -4,6 +4,9 @@ import { WalletMenu } from '@/components/WalletMenu';
 
 const pathname = vi.hoisted(() => ({ current: '/app' }));
 const logout = vi.hoisted(() => vi.fn());
+const mockUser = vi.hoisted(() => ({
+  current: { walletAddress: 'GABCDEFGHIJKLMNOPQRSTUVWXYZ234567ABCDEFGHIJKLMNOPQRSTUV', email: null as string | null },
+}));
 
 vi.mock('next/navigation', () => ({
   usePathname: () => pathname.current,
@@ -11,7 +14,7 @@ vi.mock('next/navigation', () => ({
 
 vi.mock('@/context/AuthContext', () => ({
   useAuth: () => ({
-    user: { walletAddress: 'GABCDEFGHIJKLMNOPQRSTUVWXYZ234567ABCDEFGHIJKLMNOPQRSTUV' },
+    user: mockUser.current,
     logout,
   }),
 }));
@@ -26,6 +29,26 @@ function openMenu() {
 beforeEach(() => {
   pathname.current = '/app';
   logout.mockClear();
+  mockUser.current = { walletAddress: 'GABCDEFGHIJKLMNOPQRSTUVWXYZ234567ABCDEFGHIJKLMNOPQRSTUV', email: null };
+});
+
+describe('WalletMenu account chip (#10, #11)', () => {
+  it('shows a sliced wallet address for a wallet-signed-in user', () => {
+    render(<WalletMenu />);
+    expect(screen.getByRole('button', { expanded: false })).toHaveTextContent('GABC…STUV');
+  });
+
+  it('shows the email for a magic-link user with no wallet', () => {
+    mockUser.current = { walletAddress: null, email: 'you@example.com' };
+    render(<WalletMenu />);
+    expect(screen.getByRole('button', { expanded: false })).toHaveTextContent('you@example.com');
+  });
+
+  it('falls back to a generic label for a Twitter user with neither', () => {
+    mockUser.current = { walletAddress: null, email: null };
+    render(<WalletMenu />);
+    expect(screen.getByRole('button', { expanded: false })).toHaveTextContent('Account');
+  });
 });
 
 describe('WalletMenu secondary destinations (#151)', () => {
