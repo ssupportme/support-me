@@ -57,6 +57,7 @@ export function AppNav() {
   return (
     <>
       <nav
+        aria-label="Main Navigation"
         style={{ top: 'var(--offline-banner-h, 0px)' }}
         className="sticky w-full z-50 bg-background border-b-4 border-ink"
       >
@@ -67,6 +68,7 @@ export function AppNav() {
               onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
               aria-label="Toggle mobile menu"
               aria-expanded={mobileMenuOpen}
+              aria-controls="mobile-menu-drawer"
               className="sm:hidden btn-brutal btn-brutal-white p-2 min-h-[44px] min-w-[44px] flex items-center justify-center"
             >
               <HugeiconsIcon icon={mobileMenuOpen ? Cancel01Icon : Menu01Icon} size={22} strokeWidth={2} />
@@ -103,7 +105,7 @@ export function AppNav() {
 
         {/* Mobile Drawer / Dropdown Menu */}
         {mobileMenuOpen && (
-          <div data-testid="mobile-menu" className="sm:hidden border-t-4 border-ink bg-background px-4 py-4 space-y-2 pb-20">
+          <div id="mobile-menu-drawer" data-testid="mobile-menu" className="sm:hidden border-t-4 border-ink bg-background px-4 py-4 space-y-2 pb-20">
             {ALL_LINKS.map((link) => {
               const active = pathname === link.href;
               return (

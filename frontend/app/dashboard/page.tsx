@@ -334,7 +334,7 @@ export default function DashboardPage() {
     <ProtectedRoute>
       <div className="min-h-screen bg-background">
         <AppNav />
-        <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-10">
+        <main id="main-content" className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-10">
           <div className="flex items-center justify-between mb-8 gap-4">
             <h1 className="text-4xl font-extrabold text-ink tracking-tight">Dashboard</h1>
             <button
@@ -572,7 +572,7 @@ export default function DashboardPage() {
               </p>
             )}
           </div>
-        </div>
+        </main>
       </div>
 
       {showShareModal && (
