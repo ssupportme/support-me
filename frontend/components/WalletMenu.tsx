@@ -23,8 +23,20 @@ const SECONDARY_LINKS = [
 ];
 
 function sliceAddress(addr: string) {
-  if (!addr) return '';
   return `${addr.slice(0, 4)}…${addr.slice(-4)}`;
+}
+
+/**
+ * The account identifier shown in the header chip. A user signed in with a
+ * wallet has walletAddress; a Twitter-only user has neither (Twitter's API
+ * doesn't return a verified email for the scopes this app requests - see
+ * docs/authentication.md "Twitter / X OAuth 2.0"); a magic-link user has
+ * email. Falls back to a generic label rather than rendering an empty chip.
+ */
+function accountLabel(user: { walletAddress: string | null; email?: string | null }): string {
+  if (user.walletAddress) return sliceAddress(user.walletAddress);
+  if (user.email) return user.email;
+  return 'Account';
 }
 
 /**
@@ -66,7 +78,7 @@ export function WalletMenu() {
         aria-expanded={open}
         className="btn-brutal btn-brutal-white text-sm sm:text-base font-mono gap-1.5 min-h-[44px] flex items-center justify-center"
       >
-        {sliceAddress(user.walletAddress)}
+        {accountLabel(user)}
         <span className={`text-xs transition-transform ${open ? 'rotate-180' : ''}`}>▾</span>
       </button>
 
