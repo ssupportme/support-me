@@ -101,4 +101,145 @@ describe('AuthContext', () => {
     expect(localStorage.getItem('authToken')).toBeNull();
     expect(mockDisconnectWallet).toHaveBeenCalledTimes(1);
   });
+
+  describe('Twitter OAuth (#10)', () => {
+    it('returns the redirect URL from the backend', async () => {
+      const fetchMock = vi.mocked(fetch);
+      fetchMock.mockResolvedValueOnce(jsonResponse({ redirectUrl: 'https://twitter.com/i/oauth2/authorize?...' }));
+
+      const { result } = renderHook(() => useAuth(), { wrapper: AuthProvider });
+      await waitFor(() => expect(result.current.loading).toBe(false));
+
+      const url = await result.current.getTwitterRedirectUrl();
+
+      expect(url).toBe('https://twitter.com/i/oauth2/authorize?...');
+    });
+
+    it('throws when starting Twitter sign-in fails (e.g. unconfigured provider)', async () => {
+      const fetchMock = vi.mocked(fetch);
+      fetchMock.mockResolvedValueOnce(jsonResponse({ error: 'Twitter sign-in is not configured' }, false));
+
+      const { result } = renderHook(() => useAuth(), { wrapper: AuthProvider });
+      await waitFor(() => expect(result.current.loading).toBe(false));
+
+      await expect(result.current.getTwitterRedirectUrl()).rejects.toThrow('Twitter sign-in is not configured');
+    });
+
+    it('completes sign-in and persists the session', async () => {
+      const fetchMock = vi.mocked(fetch);
+      fetchMock.mockResolvedValueOnce(
+        jsonResponse({
+          user: { id: 2, walletAddress: null },
+          token: 'twitter-jwt',
+          hasProfile: false,
+        })
+      );
+
+      const { result } = renderHook(() => useAuth(), { wrapper: AuthProvider });
+      await waitFor(() => expect(result.current.loading).toBe(false));
+
+      let loginResult;
+      await act(async () => {
+        loginResult = await result.current.completeTwitterLogin('the-code', 'the-state');
+      });
+
+      expect(loginResult).toEqual({
+        user: { id: 2, walletAddress: null },
+        token: 'twitter-jwt',
+        hasProfile: false,
+      });
+      expect(result.current.token).toBe('twitter-jwt');
+      expect(localStorage.getItem('authToken')).toBe('twitter-jwt');
+    });
+
+    it('throws when the state is invalid or expired', async () => {
+      const fetchMock = vi.mocked(fetch);
+      fetchMock.mockResolvedValueOnce(
+        jsonResponse({ error: 'Invalid or expired OAuth state, please try again' }, false)
+      );
+
+      const { result } = renderHook(() => useAuth(), { wrapper: AuthProvider });
+      await waitFor(() => expect(result.current.loading).toBe(false));
+
+      await expect(result.current.completeTwitterLogin('code', 'stale-state')).rejects.toThrow(
+        'Invalid or expired OAuth state, please try again'
+      );
+    });
+  });
+
+  describe('magic link sign-in (#11)', () => {
+    it('requests a magic link without throwing on success', async () => {
+      const fetchMock = vi.mocked(fetch);
+      fetchMock.mockResolvedValueOnce(
+        jsonResponse({ message: 'If that email is valid, a sign-in link has been sent.' })
+      );
+
+      const { result } = renderHook(() => useAuth(), { wrapper: AuthProvider });
+      await waitFor(() => expect(result.current.loading).toBe(false));
+
+      await expect(result.current.requestMagicLink('you@example.com')).resolves.toBeUndefined();
+      expect(fetchMock).toHaveBeenCalledWith(
+        expect.stringContaining('/api/auth/magic-link'),
+        expect.objectContaining({
+          method: 'POST',
+          body: JSON.stringify({ email: 'you@example.com' }),
+        })
+      );
+    });
+
+    it('throws when the request is rate-limited', async () => {
+      const fetchMock = vi.mocked(fetch);
+      fetchMock.mockResolvedValueOnce(
+        jsonResponse({ error: 'Too many requests, please try again later' }, false)
+      );
+
+      const { result } = renderHook(() => useAuth(), { wrapper: AuthProvider });
+      await waitFor(() => expect(result.current.loading).toBe(false));
+
+      await expect(result.current.requestMagicLink('you@example.com')).rejects.toThrow(
+        'Too many requests, please try again later'
+      );
+    });
+
+    it('verifies a valid token and persists the session', async () => {
+      const fetchMock = vi.mocked(fetch);
+      fetchMock.mockResolvedValueOnce(
+        jsonResponse({
+          user: { id: 3, email: 'you@example.com', walletAddress: null },
+          token: 'magic-link-jwt',
+          hasProfile: true,
+          username: 'you',
+        })
+      );
+
+      const { result } = renderHook(() => useAuth(), { wrapper: AuthProvider });
+      await waitFor(() => expect(result.current.loading).toBe(false));
+
+      let loginResult;
+      await act(async () => {
+        loginResult = await result.current.verifyMagicLink('the-token');
+      });
+
+      expect(loginResult).toEqual({
+        user: { id: 3, email: 'you@example.com', walletAddress: null },
+        token: 'magic-link-jwt',
+        hasProfile: true,
+        username: 'you',
+      });
+      expect(result.current.token).toBe('magic-link-jwt');
+      expect(localStorage.getItem('authToken')).toBe('magic-link-jwt');
+    });
+
+    it('throws when the token has already been used', async () => {
+      const fetchMock = vi.mocked(fetch);
+      fetchMock.mockResolvedValueOnce(jsonResponse({ error: 'This magic link has already been used' }, false));
+
+      const { result } = renderHook(() => useAuth(), { wrapper: AuthProvider });
+      await waitFor(() => expect(result.current.loading).toBe(false));
+
+      await expect(result.current.verifyMagicLink('used-token')).rejects.toThrow(
+        'This magic link has already been used'
+      );
+    });
+  });
 });

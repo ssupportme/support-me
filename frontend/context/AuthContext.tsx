@@ -6,7 +6,8 @@ import { API_URL } from '@/lib/api';
 
 interface User {
   id: number;
-  walletAddress: string;
+  walletAddress: string | null;
+  email?: string | null;
 }
 
 interface LoginResult {
@@ -21,6 +22,10 @@ interface AuthContextType {
   token: string | null;
   loading: boolean;
   loginWithWallet: () => Promise<LoginResult>;
+  getTwitterRedirectUrl: () => Promise<string>;
+  completeTwitterLogin: (code: string, state: string) => Promise<LoginResult>;
+  requestMagicLink: (email: string) => Promise<void>;
+  verifyMagicLink: (token: string) => Promise<LoginResult>;
   logout: () => void;
 }
 
@@ -49,6 +54,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setLoading(false);
   }, []);
 
+  // Every sign-in method (wallet, Twitter, magic link) ends the same way:
+  // the backend returns the same LoginResult shape, so persisting the
+  // session is identical regardless of how the user proved their identity.
+  const persistSession = (data: LoginResult): LoginResult => {
+    setToken(data.token);
+    setUser(data.user);
+    localStorage.setItem('authToken', data.token);
+    localStorage.setItem('authUser', JSON.stringify(data.user));
+    return data;
+  };
+
   const loginWithWallet = async (): Promise<LoginResult> => {
     const address = await connectWallet();
 
@@ -76,11 +92,56 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
     const data: LoginResult = await verifyRes.json();
 
-    setToken(data.token);
-    setUser(data.user);
-    localStorage.setItem('authToken', data.token);
-    localStorage.setItem('authUser', JSON.stringify(data.user));
-    return data;
+    return persistSession(data);
+  };
+
+  const getTwitterRedirectUrl = async (): Promise<string> => {
+    const res = await fetch(`${API_URL}/api/auth/twitter`);
+    if (!res.ok) {
+      const error = await res.json();
+      throw new Error(error.error || 'Failed to start Twitter sign-in');
+    }
+    const { redirectUrl } = await res.json();
+    return redirectUrl;
+  };
+
+  const completeTwitterLogin = async (code: string, state: string): Promise<LoginResult> => {
+    const params = new URLSearchParams({ code, state });
+    const res = await fetch(`${API_URL}/api/auth/twitter/callback?${params.toString()}`);
+    if (!res.ok) {
+      const error = await res.json();
+      throw new Error(error.error || 'Twitter sign-in failed');
+    }
+    const data: LoginResult = await res.json();
+
+    return persistSession(data);
+  };
+
+  const requestMagicLink = async (email: string): Promise<void> => {
+    const res = await fetch(`${API_URL}/api/auth/magic-link`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email }),
+    });
+    if (!res.ok) {
+      const error = await res.json();
+      throw new Error(error.error || 'Failed to send magic link');
+    }
+  };
+
+  const verifyMagicLink = async (token: string): Promise<LoginResult> => {
+    const res = await fetch(`${API_URL}/api/auth/magic-link/verify`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ token }),
+    });
+    if (!res.ok) {
+      const error = await res.json();
+      throw new Error(error.error || 'This magic link is invalid or has expired');
+    }
+    const data: LoginResult = await res.json();
+
+    return persistSession(data);
   };
 
   const logout = () => {
@@ -92,7 +153,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   return (
-    <AuthContext.Provider value={{ user, token, loading: loading || !mounted, loginWithWallet, logout }}>
+    <AuthContext.Provider
+      value={{
+        user,
+        token,
+        loading: loading || !mounted,
+        loginWithWallet,
+        getTwitterRedirectUrl,
+        completeTwitterLogin,
+        requestMagicLink,
+        verifyMagicLink,
+        logout,
+      }}
+    >
       {children}
     </AuthContext.Provider>
   );

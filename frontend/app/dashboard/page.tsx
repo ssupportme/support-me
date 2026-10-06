@@ -15,6 +15,7 @@ import { DonationHistorySkeleton } from '@/components/DonationHistorySkeleton';
 import { TipChart } from '@/components/TipChart';
 import { ShareCard } from '@/components/ShareCard';
 import { ShareModal } from '@/components/ShareModal';
+import { QrCodeCard } from '@/components/QrCodeCard';
 import { usePrices } from '@/lib/usePrices';
 import { formatUsd } from '@/lib/prices';
 import { API_URL } from '@/lib/api';
@@ -334,7 +335,7 @@ export default function DashboardPage() {
     <ProtectedRoute>
       <div className="min-h-screen bg-background">
         <AppNav />
-        <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-10">
+        <main id="main-content" className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-10">
           <div className="flex items-center justify-between mb-8 gap-4">
             <h1 className="text-4xl font-extrabold text-ink tracking-tight">Dashboard</h1>
             <button
@@ -413,6 +414,10 @@ export default function DashboardPage() {
               </div>
             </>
           )}
+
+          <div className="mb-8">
+            <QrCodeCard creator={creator} />
+          </div>
 
           {/* Recent Activity — tips received and cash-outs, newest first */}
           <div className="card-brutal p-4 sm:p-6 overflow-x-auto">
@@ -572,7 +577,7 @@ export default function DashboardPage() {
               </p>
             )}
           </div>
-        </div>
+        </main>
       </div>
 
       {showShareModal && (

@@ -642,4 +642,4 @@ MIT
 
 ## Support
 
-For issues, questions, or suggestions, please open an issue on GitHub or contact the team.
+For issues, questions, or suggestions, please open an issue on GitHub or contact the team..
