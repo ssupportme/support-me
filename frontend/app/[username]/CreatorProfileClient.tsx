@@ -29,6 +29,7 @@ import { Skeleton } from '@/components/Skeleton';
 import { TipJarLoader } from '@/components/TipJarLoader';
 import { LanguageSwitcher } from '@/components/LanguageSwitcher';
 import { getMessages, useLocalePreference } from '@/lib/i18n';
+import { THEME_LAYOUTS, themeStyle, type ProfileTheme } from '@/lib/theme';
 
 
 const HORIZON_URL = 'https://horizon-testnet.stellar.org';
@@ -49,6 +50,8 @@ interface Creator {
   // Creator-configured quick-select donate amounts (#120), set from
   // Settings. Absent/empty means the creator hasn't customized these.
   presetAmounts?: number[] | null;
+  // Custom profile theme (#227); null/absent means the default design.
+  theme?: ProfileTheme | null;
 }
 
 // Fallback quick-select amounts shown on the donate page when a creator
@@ -543,6 +546,8 @@ function CreatorProfileView({ username, locale, onLocaleChange }: CreatorProfile
       notify.error(tProfile('share.copyFailed'));
     }
   };
+
+  const layout = THEME_LAYOUTS[creator.theme?.layout ?? 'default'];
 
   return (
     <div className="min-h-screen bg-background py-10 px-4">
