@@ -268,12 +268,12 @@ cp .env.example .env
 # Generate the Prisma client
 npm run prisma:generate
 
-# Push the schema to your database (creates the User/Creator/Donation and
-# AdminAuditLog tables). There is no migrations/ folder in this repo, so use
-# `db push` rather than `prisma:migrate` - it syncs schema.prisma directly to
-# the database. Reconcile historical duplicate on-chain identities before
-# applying the new unique constraint to a populated database.
-npx prisma db push
+# Run database migrations (creates the User/Creator/Donation and
+# AdminAuditLog tables). Migrations are tracked in backend/prisma/migrations/.
+npx prisma migrate dev
+
+# Note: `db push` is only acceptable for throwaway prototyping.
+# For development, staging, and production, always use `migrate dev`/`migrate deploy`.
 
 # Start the development server
 npm run dev
