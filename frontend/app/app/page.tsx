@@ -250,7 +250,7 @@ export default function AppHubPage() {
           <div className="card-brutal p-6">
             <h2 className="text-lg font-extrabold text-ink mb-1">Cash out</h2>
             <p className="text-sm text-muted mb-4 font-medium">
-              Convert your USDC to Naira and send it straight to your bank account.
+              Convert XLM to USDC (if needed), then convert your USDC to Naira and send it straight to your bank account.
             </p>
             <Link
               href="/app/withdraw"

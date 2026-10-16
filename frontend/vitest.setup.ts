@@ -19,6 +19,7 @@ vi.mock('@/lib/wallet', () => ({
   disconnectWallet: vi.fn(),
   signMessage: vi.fn(),
   initWallet: vi.fn(),
+  signTransaction: vi.fn(),
 }));
 
 vi.mock('next/font/google', () => ({

@@ -8,6 +8,10 @@ import { AppNav } from '@/components/AppNav';
 import { Skeleton } from '@/components/Skeleton';
 import { notify } from '@/lib/notify';
 import { useNgnRate } from '@/lib/useNgnRate';
+import dynamic from 'next/dynamic';
+
+// lazy-load modal so tests / SSR are not disturbed
+const ConvertXlmToUsdcModal = dynamic(() => import('@/components/ConvertXlmToUsdcModal'), { ssr: false });
 
 const HORIZON_URL = 'https://horizon-testnet.stellar.org';
 const server = new StellarSdk.Horizon.Server(HORIZON_URL);
@@ -39,6 +43,8 @@ export default function WithdrawPage() {
   const [accountName, setAccountName] = useState<string | null>(null);
   const [verifyError, setVerifyError] = useState<string | null>(null);
 
+  const [showConvertModal, setShowConvertModal] = useState(false);
+
   useEffect(() => {
     if (!walletAddress) { setBalancesLoading(false); return; }
     server.loadAccount(walletAddress)
@@ -65,6 +71,12 @@ export default function WithdrawPage() {
   const NGN_PER_USDC = ngnRate?.rate || 1380;
   const naira = amount ? Number(amount) * NGN_PER_USDC : 0;
   const availableUsdc = usdcBalance != null ? parseFloat(usdcBalance) : 0;
+
+  // Helper to open convert modal prefilled with full XLM balance
+  const openConvertModalMax = () => {
+    const max = xlmBalance ? Number(xlmBalance) : 0;
+    setShowConvertModal(true);
+  };
 
   const verifyAccount = async (acctNo: string, selectedBank: string) => {
     if (!/^\d{10}$/.test(acctNo) || !selectedBank) return;
@@ -150,6 +162,18 @@ export default function WithdrawPage() {
               </div>
             )}
           </div>
+
+          {/* If user has XLM but no usable USDC, prompt conversion */}
+          {!balancesLoading && xlmBalance && Number(xlmBalance) > 0 && (usdcBalance == null || Number(usdcBalance) === 0) && (
+            <div className="card-brutal p-4 bg-amber-100 text-sm">
+              <p className="font-bold">Heads up</p>
+              <p className="mt-1">You currently hold XLM. Convert XLM to USDC to use the withdraw flow.</p>
+              <div className="mt-3 flex gap-2">
+                <button className="btn-brutal btn-brutal-primary" onClick={() => setShowConvertModal(true)}>Convert XLM to USDC</button>
+                <button className="btn-brutal btn-brutal-white" onClick={() => setShowConvertModal(true)}>Convert Max</button>
+              </div>
+            </div>
+          )}
 
           <div className="card-brutal bg-brand-lime/30 p-4 text-sm font-medium text-ink">
             Demo mode, this simulates a licensed off-ramp. No real bank transfer occurs and no on-chain funds move.
@@ -267,6 +291,30 @@ export default function WithdrawPage() {
           )}
         </div>
       </div>
+
+      {showConvertModal && (
+        <ConvertXlmToUsdcModal
+          open={showConvertModal}
+          onClose={() => setShowConvertModal(false)}
+          maxXlm={xlmBalance ? Number(xlmBalance) : 0}
+          onSuccess={() => {
+            // after a successful conversion, refresh balances so user can withdraw
+            setBalancesLoading(true);
+            server.loadAccount(walletAddress)
+              .then((account) => {
+                const native = account.balances.find((b) => b.asset_type === 'native');
+                setXlmBalance(native ? Math.round(parseFloat((native as any).balance)).toString() : '0');
+                if (USDC_ISSUER) {
+                  const usdc = account.balances.find(
+                    (b) => (b as any).asset_code === 'USDC' && (b as any).asset_issuer === USDC_ISSUER
+                  );
+                  setUsdcBalance(usdc ? Math.round(parseFloat((usdc as any).balance)).toString() : null);
+                }
+              })
+              .finally(() => setBalancesLoading(false));
+          }}
+        />
+      )}
     </ProtectedRoute>
   );
 }
