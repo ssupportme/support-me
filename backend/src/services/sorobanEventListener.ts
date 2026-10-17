@@ -15,14 +15,18 @@ import {
   eventBus,
 } from "./eventBus";
 
-const RPC_URL = process.env.SOROBAN_RPC_URL || "https://soroban-testnet.stellar.org";
+const RPC_URL =
+  process.env.SOROBAN_RPC_URL || "https://soroban-testnet.stellar.org";
 const DONATION_CONTRACT_ID = process.env.NEXT_PUBLIC_DONATION_CONTRACT_ID;
-const CREATOR_REGISTRY_CONTRACT_ID = process.env.NEXT_PUBLIC_CREATOR_REGISTRY_CONTRACT_ID;
-const POLL_INTERVAL_MS = Number(process.env.SOROBAN_EVENTS_POLL_INTERVAL_MS) || 5000;
+const CREATOR_REGISTRY_CONTRACT_ID =
+  process.env.NEXT_PUBLIC_CREATOR_REGISTRY_CONTRACT_ID;
+const POLL_INTERVAL_MS =
+  Number(process.env.SOROBAN_EVENTS_POLL_INTERVAL_MS) || 5000;
 // How far back to look for events the first time the listener starts, so a
 // freshly-restarted backend still surfaces recent events instead of only
 // ones that happen after this exact moment.
-const LOOKBACK_LEDGERS = Number(process.env.SOROBAN_EVENTS_LOOKBACK_LEDGERS) || 100;
+const LOOKBACK_LEDGERS =
+  Number(process.env.SOROBAN_EVENTS_LOOKBACK_LEDGERS) || 100;
 
 export interface RawEvent {
   type: string;
@@ -37,13 +41,19 @@ export function decodeScVal(base64Xdr: string): unknown {
   return scValToNative(xdr.ScVal.fromXDR(base64Xdr, "base64"));
 }
 
-async function rpcCall<T>(method: string, params: Record<string, unknown>): Promise<T> {
+async function rpcCall<T>(
+  method: string,
+  params: Record<string, unknown>,
+): Promise<T> {
   const response = await fetch(RPC_URL, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }),
   });
-  const body = (await response.json()) as { result?: T; error?: { message: string } };
+  const body = (await response.json()) as {
+    result?: T;
+    error?: { message: string };
+  };
   if (body.error) {
     throw new Error(`Soroban RPC ${method} failed: ${body.error.message}`);
   }
@@ -66,7 +76,7 @@ export class SorobanEventListener {
   start(): void {
     if (!DONATION_CONTRACT_ID) {
       console.warn(
-        "SorobanEventListener: NEXT_PUBLIC_DONATION_CONTRACT_ID is not set, skipping event polling."
+        "SorobanEventListener: NEXT_PUBLIC_DONATION_CONTRACT_ID is not set, skipping event polling.",
       );
       return;
     }
@@ -79,7 +89,7 @@ export class SorobanEventListener {
     console.log(
       `SorobanEventListener: polling ${RPC_URL} for contracts [${DONATION_CONTRACT_ID}${
         CREATOR_REGISTRY_CONTRACT_ID ? `, ${CREATOR_REGISTRY_CONTRACT_ID}` : ""
-      }] every ${POLL_INTERVAL_MS}ms`
+      }] every ${POLL_INTERVAL_MS}ms`,
     );
   }
 
@@ -186,7 +196,7 @@ export class SorobanEventListener {
         } catch (err) {
           console.error(
             `SorobanEventListener: error reconciling cancelled subscription #${subId}:`,
-            (err as Error).message
+            (err as Error).message,
           );
         }
         return true;
@@ -194,16 +204,17 @@ export class SorobanEventListener {
 
       case "goal_upd": {
         const value = decodeScVal(evt.value) as {
-          goal_amount: bigint | number;
+          goal_amount: bigint | string | number;
           updated_at: bigint | number;
         };
 
         const creatorAddress = topics[1] as string;
-        const goalAmount = Number(value.goal_amount);
+        const goalAmountBigInt = BigInt(value.goal_amount);
+        const goalAmountStr = goalAmountBigInt.toString();
 
         const payload: GoalUpdatedEvent = {
           creator: creatorAddress,
-          goalAmount: value.goal_amount.toString(),
+          goalAmount: goalAmountStr,
           updatedAt: Number(value.updated_at),
           ledger: evt.ledger,
           txHash: evt.txHash,
@@ -216,12 +227,17 @@ export class SorobanEventListener {
         try {
           await prisma.creator.updateMany({
             where: { walletAddress: creatorAddress },
-            data: { donationGoal: goalAmount },
+            data: {
+              donationGoal:
+                goalAmountBigInt <= BigInt(2147483647)
+                  ? Number(goalAmountBigInt)
+                  : 2147483647,
+            },
           });
         } catch (err) {
           console.error(
             `SorobanEventListener: error reconciling creator goal for ${creatorAddress}:`,
-            (err as Error).message
+            (err as Error).message,
           );
         }
         return true;
@@ -280,7 +296,7 @@ export class SorobanEventListener {
       } else {
         const { sequence: latestLedger } = await rpcCall<{ sequence: number }>(
           "getLatestLedger",
-          {}
+          {},
         );
         params.startLedger = Math.max(latestLedger - LOOKBACK_LEDGERS, 1);
       }
@@ -295,7 +311,10 @@ export class SorobanEventListener {
         this.cursor = result.events[result.events.length - 1].id;
       }
     } catch (error) {
-      console.error("SorobanEventListener: poll failed:", (error as Error).message);
+      console.error(
+        "SorobanEventListener: poll failed:",
+        (error as Error).message,
+      );
     } finally {
       this.polling = false;
     }
