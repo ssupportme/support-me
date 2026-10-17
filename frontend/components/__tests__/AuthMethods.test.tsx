@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterAll } from 'vitest';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { AuthMethods } from '@/components/AuthMethods';
 import { useAuth } from '@/context/AuthContext';
@@ -31,9 +31,19 @@ describe('AuthMethods', () => {
     mockUseAuth.mockReset();
     // getTwitterRedirectUrl success navigates via window.location.href;
     // jsdom doesn't implement real navigation, so stub it to observe the call.
-    // @ts-expect-error - redefining a read-only jsdom property for the test
-    delete window.location;
-    window.location = { ...originalLocation, href: '' } as Location;
+    Object.defineProperty(window, 'location', {
+      writable: true,
+      configurable: true,
+      value: { ...originalLocation, href: '' },
+    });
+  });
+
+  afterAll(() => {
+    Object.defineProperty(window, 'location', {
+      writable: true,
+      configurable: true,
+      value: originalLocation,
+    });
   });
 
   it('calls loginWithWallet when Connect Wallet is clicked', async () => {

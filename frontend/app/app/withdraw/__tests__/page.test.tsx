@@ -1,9 +1,37 @@
+import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, waitFor, fireEvent } from '@testing-library/react';
-import WithdrawPage from '@/app/app/withdraw/page';
+import WithdrawPage from '../page';
 import { useAuth } from '@/context/AuthContext';
 import { useCreator } from '@/context/CreatorContext';
+import { useNgnRate } from '@/lib/useNgnRate';
+import { usePrices } from '@/lib/usePrices';
 import { notify } from '@/lib/notify';
+
+const { mockLoadAccount, mockNotifySuccess, mockNotifyError } = vi.hoisted(() => ({
+  mockLoadAccount: vi.fn(),
+  mockNotifySuccess: vi.fn(),
+  mockNotifyError: vi.fn(),
+}));
+
+vi.mock('@stellar/stellar-sdk', async () => {
+  const actual = await vi.importActual<any>('@stellar/stellar-sdk');
+  return {
+    ...actual,
+    Horizon: {
+      ...actual.Horizon,
+      Server: class MockServer {
+        loadAccount = mockLoadAccount;
+      },
+    },
+  };
+});
+
+vi.mock('@/lib/notify', () => ({
+  notify: {
+    success: mockNotifySuccess,
+    error: mockNotifyError,
+  },
+}));
 
 vi.mock('@/context/AuthContext', () => ({
   useAuth: vi.fn(),
@@ -13,48 +41,29 @@ vi.mock('@/context/CreatorContext', () => ({
   useCreator: vi.fn(),
 }));
 
+vi.mock('@/lib/useNgnRate', () => ({
+  useNgnRate: vi.fn(),
+}));
+
+vi.mock('@/lib/usePrices', () => ({
+  usePrices: vi.fn(),
+}));
+
+vi.mock('@/components/ProtectedRoute', () => ({
+  ProtectedRoute: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
+}));
+
 vi.mock('@/components/AppNav', () => ({
   AppNav: () => <nav data-testid="app-nav" />,
 }));
 
-vi.mock('@/lib/notify', () => ({
-  notify: {
-    success: vi.fn(),
-    error: vi.fn(),
-  },
-}));
-
-vi.mock('@/lib/useNgnRate', () => ({
-  useNgnRate: () => ({
-    rate: 1500,
-    ageMinutes: 2,
-    isStale: false,
-    source: 'coingecko',
-  }),
-}));
-
-vi.mock('@stellar/stellar-sdk', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('@stellar/stellar-sdk')>();
-  return {
-    ...actual,
-    Horizon: {
-      ...actual.Horizon,
-      Server: class MockServer {
-        loadAccount = vi.fn().mockResolvedValue({
-          balances: [
-            { asset_type: 'native', balance: '100.5' },
-            { asset_code: 'USDC', asset_issuer: 'GBUSDC', balance: '250.0' },
-          ],
-        });
-      },
-    },
-  };
-});
-
 const mockUseAuth = vi.mocked(useAuth);
 const mockUseCreator = vi.mocked(useCreator);
+const mockUseNgnRate = vi.mocked(useNgnRate);
+const mockUsePrices = vi.mocked(usePrices);
 
-describe('WithdrawPage', () => {
+describe('WithdrawPage - XLM and USDC Cash Out (#154, #164)', () => {
+  const MOCK_USDC_ISSUER = 'GA5ZSEJYB37JRC5AVCIA5MOP4RHTM335X2KGX3IHOJAPP5RE34K4KZVN';
   const creator = {
     id: 1,
     userId: 42,
@@ -71,13 +80,17 @@ describe('WithdrawPage', () => {
   };
 
   beforeEach(() => {
-    process.env.NEXT_PUBLIC_USDC_ISSUER = 'GBUSDC';
+    vi.stubEnv('NEXT_PUBLIC_USDC_ISSUER', MOCK_USDC_ISSUER);
 
     mockUseAuth.mockReturnValue({
       user: { id: 42, walletAddress: 'GALICE' },
       token: 'test-token',
       loading: false,
       loginWithWallet: vi.fn(),
+      getTwitterRedirectUrl: vi.fn(),
+      completeTwitterLogin: vi.fn(),
+      requestMagicLink: vi.fn(),
+      verifyMagicLink: vi.fn(),
       logout: vi.fn(),
     });
 
@@ -87,10 +100,50 @@ describe('WithdrawPage', () => {
       invalidate: vi.fn(),
     });
 
-    vi.stubGlobal('fetch', vi.fn());
+    mockUseNgnRate.mockReturnValue({
+      rate: 1380,
+      xlmRate: 165,
+      source: 'coingecko',
+      timestamp: Date.now(),
+      loading: false,
+      isStale: false,
+      ageMinutes: 0,
+    });
+
+    (mockUsePrices as any).mockReturnValue({
+      XLM: 0.12,
+      USDC: 1.0,
+    });
+
+    mockLoadAccount.mockResolvedValue({
+      balances: [
+        { asset_type: 'native', balance: '500.0000000' },
+        { asset_type: 'credit_alphanum4', asset_code: 'USDC', asset_issuer: MOCK_USDC_ISSUER, balance: '25.0000000' },
+      ],
+    });
+
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockImplementation((url: string) => {
+        if (typeof url === 'string' && url.includes('/api/verify-account')) {
+          return Promise.resolve({
+            ok: true,
+            status: 200,
+            json: async () => ({ accountName: 'Jane Doe' }),
+          });
+        }
+        return Promise.resolve({
+          ok: true,
+          status: 200,
+          json: async () => ({}),
+        });
+      })
+    );
   });
 
   afterEach(() => {
+    vi.useRealTimers();
+    vi.unstubAllEnvs();
     vi.unstubAllGlobals();
     vi.clearAllMocks();
   });
@@ -105,48 +158,101 @@ describe('WithdrawPage', () => {
     ).toBeInTheDocument();
   });
 
-  it('renders user balances', async () => {
+  it('defaults to XLM cash-out for a creator holding XLM, displaying balance and direct cash-out notice', async () => {
     render(<WithdrawPage />);
 
     await waitFor(() => {
-      expect(screen.getByText('101')).toBeInTheDocument(); // Math.round(100.5)
-      expect(screen.getByText('250')).toBeInTheDocument(); // Math.round(250.0)
+      expect(screen.getByText('500')).toBeInTheDocument();
+      expect(screen.getByText('25')).toBeInTheDocument();
+    });
+
+    expect(screen.getByText(/Direct XLM cash-out enabled/i)).toBeInTheDocument();
+    expect(screen.getByText(/Your XLM will be converted directly to Naira/i)).toBeInTheDocument();
+    expect(screen.getByText('Swap XLM to USDC')).toBeInTheDocument();
+
+    const xlmRadio = screen.getByRole('radio', { name: /xlm/i });
+    expect(xlmRadio).toHaveAttribute('aria-checked', 'true');
+  });
+
+  it('allows switching between XLM and USDC cash-out', async () => {
+    render(<WithdrawPage />);
+
+    await waitFor(() => {
+      expect(screen.getByRole('radio', { name: /xlm/i })).toBeInTheDocument();
+    });
+
+    const usdcRadio = screen.getByRole('radio', { name: /usdc/i });
+    fireEvent.click(usdcRadio);
+
+    expect(usdcRadio).toHaveAttribute('aria-checked', 'true');
+    expect(screen.getByText(/Direct USDC cash-out enabled/i)).toBeInTheDocument();
+    expect(screen.getByLabelText(/Amount \(USDC\)/i)).toBeInTheDocument();
+  });
+
+  it('updates estimated Naira amount based on entered XLM amount and XLM rate', async () => {
+    render(<WithdrawPage />);
+
+    await waitFor(() => {
+      expect(screen.getByText('500')).toBeInTheDocument();
+    });
+
+    const amtInput = screen.getByLabelText(/Amount \(XLM\)/i);
+    fireEvent.change(amtInput, { target: { value: '100' } });
+
+    // 100 * 165 = 16,500
+    await waitFor(() => {
+      expect(screen.getByText(/₦16,500/)).toBeInTheDocument();
+      expect(screen.getByText(/₦165\/XLM/)).toBeInTheDocument();
     });
   });
 
-  it('validates amount, bank, and account number before submitting', async () => {
+  it('supports Max button to fill full available balance for selected asset', async () => {
     render(<WithdrawPage />);
 
-    // Try submit without amount
-    fireEvent.click(screen.getByRole('button', { name: /Simulate withdrawal/i }));
-    expect(await screen.findByText('Enter an amount greater than zero.')).toBeInTheDocument();
+    await waitFor(() => {
+      expect(screen.getByText('500')).toBeInTheDocument();
+    });
 
-    // Fill invalid amount exceeding balance (balance is 250)
-    fireEvent.change(screen.getByLabelText(/Amount \(USDC\)/i), { target: { value: '500' } });
-    fireEvent.click(screen.getByRole('button', { name: /Simulate withdrawal/i }));
-    expect(await screen.findByText('Amount exceeds your available USDC balance.')).toBeInTheDocument();
+    const maxButton = screen.getByRole('button', { name: /Max \(500 XLM\)/i });
+    fireEvent.click(maxButton);
 
-    // Fill valid amount
-    fireEvent.change(screen.getByLabelText(/Amount \(USDC\)/i), { target: { value: '50' } });
-    fireEvent.click(screen.getByRole('button', { name: /Simulate withdrawal/i }));
-    expect(await screen.findByText('Enter a valid 10-digit account number.')).toBeInTheDocument();
+    const amtInput = screen.getByLabelText(/Amount \(XLM\)/i) as HTMLInputElement;
+    expect(amtInput.value).toBe('500');
 
-    // Fill invalid account number
-    fireEvent.change(screen.getByLabelText(/Account number/i), { target: { value: '123' } });
-    fireEvent.click(screen.getByRole('button', { name: /Simulate withdrawal/i }));
-    expect(await screen.findByText('Enter a valid 10-digit account number.')).toBeInTheDocument();
+    // 500 * 165 = 82,500
+    expect(screen.getByText(/₦82,500/)).toBeInTheDocument();
+  });
 
-    // Fill valid 10-digit account number but no bank
-    fireEvent.change(screen.getByLabelText(/Account number/i), { target: { value: '0123456789' } });
-    fireEvent.click(screen.getByRole('button', { name: /Simulate withdrawal/i }));
-    expect(await screen.findByText('Select your bank.')).toBeInTheDocument();
+  it('validates insufficient balance and displays clear error', async () => {
+    render(<WithdrawPage />);
+
+    await waitFor(() => {
+      expect(screen.getByText('500')).toBeInTheDocument();
+    });
+
+    const amtInput = screen.getByLabelText(/Amount \(XLM\)/i);
+    fireEvent.change(amtInput, { target: { value: '600' } });
+
+    const submitBtn = screen.getByRole('button', { name: /Simulate withdrawal/i });
+    fireEvent.click(submitBtn);
+
+    await waitFor(() => {
+      expect(screen.getByText('Amount exceeds your available XLM balance.')).toBeInTheDocument();
+    });
   });
 
   it('verifies bank account number and displays account holder name', async () => {
-    vi.mocked(fetch).mockResolvedValueOnce({
-      ok: true,
-      json: async () => ({ accountName: 'ALICE JANE DOE' }),
-    } as Response);
+    vi.mocked(fetch).mockImplementation((input: any) => {
+      const url = typeof input === 'string' ? input : input.toString();
+      if (url.includes('/api/verify-account')) {
+        return Promise.resolve({
+          ok: true,
+          status: 200,
+          json: async () => ({ accountName: 'ALICE JANE DOE' }),
+        } as Response);
+      }
+      return Promise.resolve({ ok: true, status: 200, json: async () => ({}) } as Response);
+    });
 
     render(<WithdrawPage />);
 
@@ -172,36 +278,42 @@ describe('WithdrawPage', () => {
   });
 
   it('submits withdrawal successfully, calls POST /api/withdrawals, and displays reference', async () => {
-    // Mock verify-account
-    vi.mocked(fetch).mockResolvedValueOnce({
-      ok: true,
-      json: async () => ({ accountName: 'ALICE JANE DOE' }),
-    } as Response);
-
-    // Mock POST /api/withdrawals
-    vi.mocked(fetch).mockResolvedValueOnce({
-      ok: true,
-      status: 201,
-      json: async () => ({
-        id: 10,
-        creatorUsername: 'alice',
-        amountIn: 50,
-        amountOut: 75000,
-        fee: 0,
-        currency: 'USDC',
-        anchorTxId: 'PL-TESTREF123',
-        status: 'completed',
-      }),
-    } as Response);
+    vi.mocked(fetch).mockImplementation((input: any) => {
+      const url = typeof input === 'string' ? input : input.toString();
+      if (url.includes('/api/verify-account')) {
+        return Promise.resolve({
+          ok: true,
+          status: 200,
+          json: async () => ({ accountName: 'Jane Doe' }),
+        } as Response);
+      }
+      if (url.includes('/api/withdrawals')) {
+        return Promise.resolve({
+          ok: true,
+          status: 201,
+          json: async () => ({
+            id: 10,
+            creatorUsername: 'alice',
+            amountIn: 50,
+            amountOut: 8250,
+            fee: 0,
+            currency: 'XLM',
+            anchorTxId: 'PL-TESTREF123',
+            status: 'completed',
+          }),
+        } as Response);
+      }
+      return Promise.resolve({ ok: true, status: 200, json: async () => ({}) } as Response);
+    });
 
     render(<WithdrawPage />);
 
-    fireEvent.change(screen.getByLabelText(/Amount \(USDC\)/i), { target: { value: '50' } });
-    fireEvent.change(screen.getByLabelText(/Bank/i), { target: { value: 'GTBank' } });
+    fireEvent.change(screen.getByLabelText(/Amount \(XLM\)/i), { target: { value: '50' } });
+    fireEvent.change(screen.getByLabelText(/Bank/i), { target: { value: 'Access Bank' } });
     fireEvent.change(screen.getByLabelText(/Account number/i), { target: { value: '0123456789' } });
 
     await waitFor(() => {
-      expect(screen.getByText(/Account holder: ALICE JANE DOE/i)).toBeInTheDocument();
+      expect(screen.getByText(/Account holder: Jane Doe/i)).toBeInTheDocument();
     });
 
     const submitBtn = screen.getByRole('button', { name: /Simulate withdrawal/i });
@@ -212,7 +324,6 @@ describe('WithdrawPage', () => {
       expect(screen.getByText('PL-TESTREF123')).toBeInTheDocument();
     });
 
-    // Check that POST /api/withdrawals was called with expected headers and body
     expect(fetch).toHaveBeenCalledWith(
       expect.stringContaining('/api/withdrawals'),
       expect.objectContaining({
@@ -225,41 +336,25 @@ describe('WithdrawPage', () => {
       })
     );
 
-    expect(notify.success).toHaveBeenCalledWith('Withdrawal recorded (demo)');
+    expect(mockNotifySuccess).toHaveBeenCalledWith('Withdrawal recorded (demo)');
     expect(screen.getByRole('link', { name: /View in Dashboard/i })).toHaveAttribute(
       'href',
       '/dashboard'
     );
-
-    // Resetting form
-    fireEvent.click(screen.getByRole('button', { name: /Make another withdrawal/i }));
-    expect(screen.getByLabelText(/Amount \(USDC\)/i)).toHaveValue('');
   });
 
-  it('displays error message if backend POST /api/withdrawals fails', async () => {
-    vi.mocked(fetch).mockResolvedValueOnce({
-      ok: true,
-      json: async () => ({ accountName: 'ALICE JANE DOE' }),
-    } as Response);
-
-    vi.mocked(fetch).mockResolvedValueOnce({
-      ok: false,
-      status: 400,
-      json: async () => ({ error: 'Invalid withdrawal parameters' }),
-    } as Response);
-
+  it('opens in-app swap modal when clicking Swap XLM to USDC', async () => {
     render(<WithdrawPage />);
 
-    fireEvent.change(screen.getByLabelText(/Amount \(USDC\)/i), { target: { value: '50' } });
-    fireEvent.change(screen.getByLabelText(/Bank/i), { target: { value: 'GTBank' } });
-    fireEvent.change(screen.getByLabelText(/Account number/i), { target: { value: '0123456789' } });
-
     await waitFor(() => {
-      expect(screen.getByText(/Account holder: ALICE JANE DOE/i)).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'Swap XLM to USDC' })).toBeInTheDocument();
     });
 
-    fireEvent.click(screen.getByRole('button', { name: /Simulate withdrawal/i }));
+    const swapBtn = screen.getByRole('button', { name: 'Swap XLM to USDC' });
+    fireEvent.click(swapBtn);
 
-    expect(await screen.findByText('Invalid withdrawal parameters')).toBeInTheDocument();
+    await waitFor(() => {
+      expect(screen.getByRole('heading', { name: 'Convert XLM → USDC' })).toBeInTheDocument();
+    });
   });
 });

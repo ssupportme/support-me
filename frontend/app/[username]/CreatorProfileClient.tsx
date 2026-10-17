@@ -84,7 +84,7 @@ export default function CreatorProfileClient({
   useDocumentLang(locale);
 
   return (
-    <NextIntlClientProvider locale={locale} messages={getMessages(locale)}>
+    <NextIntlClientProvider locale={locale} messages={getMessages(locale)} timeZone="UTC">
       {/* lang on the translated region too, so it is correct on first paint
           even before useDocumentLang's effect updates <html lang>. */}
       <div lang={locale}>
@@ -583,8 +583,11 @@ function CreatorProfileView({ username, locale, onLocaleChange }: CreatorProfile
   const layout = THEME_LAYOUTS[creator.theme?.layout ?? 'default'];
 
   return (
-    <div className="min-h-screen bg-background py-10 px-4">
-      <main id="main-content" className="max-w-md mx-auto space-y-6">
+    <div
+      className={`min-h-screen bg-background px-4 ${layout.page}`}
+      style={creator.theme ? themeStyle(creator.theme) : undefined}
+    >
+      <main id="main-content" className={`max-w-md mx-auto ${layout.column}`}>
         {/* Creator header */}
         <div className="card-brutal p-8 text-center">
           <div className="w-24 h-24 mx-auto mb-4 rounded-full border-4 border-ink overflow-hidden bg-accent-bg flex items-center justify-center">
@@ -876,6 +879,7 @@ function CreatorProfileView({ username, locale, onLocaleChange }: CreatorProfile
                       {recurring && (
                         <div className="flex items-center gap-1.5">
                           <select
+                            aria-label="Subscription interval"
                             value={intervalChoice}
                             onChange={(e) => setIntervalChoice(e.target.value as typeof intervalChoice)}
                             className="input-brutal text-sm py-1.5 w-auto min-h-[44px]"

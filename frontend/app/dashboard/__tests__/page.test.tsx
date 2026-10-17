@@ -131,6 +131,13 @@ const creator = {
   username: 'alice',
   displayName: 'Alice',
   walletAddress: 'GALICE',
+  avatarUrl: null,
+  donationGoal: null,
+  acceptsXlm: true,
+  acceptsUsdc: true,
+  acceptsUsdt: false,
+  socialLinks: null,
+  presetAmounts: [],
 };
 
 const donation = {
@@ -214,6 +221,10 @@ describe('DashboardPage', () => {
       token: 'jwt-token',
       loading: false,
       loginWithWallet: vi.fn(),
+      getTwitterRedirectUrl: vi.fn(),
+      completeTwitterLogin: vi.fn(),
+      requestMagicLink: vi.fn(),
+      verifyMagicLink: vi.fn(),
       logout: vi.fn(),
     });
     mockUseCreator.mockReturnValue({
@@ -425,7 +436,7 @@ describe('DashboardPage', () => {
     render(<DashboardPage />);
     await waitFor(() => expect(screen.getByText('page 1 tip')).toBeInTheDocument());
 
-    expect(FakeIntersectionObserver.instances.length).toBeGreaterThan(0);
+    await waitFor(() => expect(FakeIntersectionObserver.instances.length).toBeGreaterThan(0));
     const observer = FakeIntersectionObserver.instances[FakeIntersectionObserver.instances.length - 1];
 
     act(() => {
