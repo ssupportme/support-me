@@ -20,6 +20,10 @@ type Font = { name: string; data: ArrayBuffer; weight: 400 | 800; style: 'normal
 async function loadGeist(weight: 400 | 800): Promise<Font | null> {
   try {
     const css = await fetch(`https://fonts.googleapis.com/css2?family=Geist:wght@${weight}`, {
+      headers: {
+        'User-Agent':
+          'Mozilla/5.0 (Macintosh; U; Intel Mac OS X 10_6_8; de-at) AppleWebKit/533.21.1 (KHTML, like Gecko) Version/5.0.5 Safari/533.21.1',
+      },
       next: { revalidate: 60 * 60 * 24 * 7 },
     }).then((r) => r.text());
     const url = css.match(/src: url\((.+?)\) format\('(?:opentype|truetype)'\)/)?.[1];
@@ -87,6 +91,7 @@ function truncate(text: string, max: number) {
 }
 
 export async function renderLandingOgImage() {
+  const fonts = await loadFonts();
   return new ImageResponse(
     (
       <div
@@ -127,7 +132,7 @@ export async function renderLandingOgImage() {
         </div>
       </div>
     ),
-    { ...OG_SIZE, fonts: await loadFonts() },
+    { ...OG_SIZE, ...(fonts.length ? { fonts } : {}) },
   );
 }
 
@@ -222,6 +227,6 @@ export async function renderCreatorOgImage(creator: OgCreator | null) {
         </div>
       </div>
     ),
-    { ...OG_SIZE, fonts },
+    { ...OG_SIZE, ...(fonts.length ? { fonts } : {}) },
   );
 }

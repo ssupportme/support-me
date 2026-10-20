@@ -25,7 +25,7 @@ import { fundWithFriendbot } from '@/lib/contract';
 const HORIZON_URL = 'https://horizon-testnet.stellar.org';
 const server = new StellarSdk.Horizon.Server(HORIZON_URL);
 
-export const BALANCE_HIDDEN_STORAGE_KEY = 'balance_hidden';
+const BALANCE_HIDDEN_STORAGE_KEY = 'balance_hidden';
 
 // The balance we hold per asset code, as a Horizon-precision string. `null`
 // means "not loaded / no trustline" and renders as a dash.
@@ -287,18 +287,26 @@ export default function AppHubPage() {
           <div className="card-brutal p-6">
             <div className="flex items-center justify-between mb-1">
               <h2 className="text-lg font-extrabold text-ink">Cash out</h2>
-              <span className="text-xs px-2 py-0.5 rounded-md bg-brand-lime border border-ink/30 font-bold text-ink">
-                Demo
-              </span>
+              <div className="flex items-center gap-1.5">
+                <span className="text-xs px-2 py-0.5 rounded-md bg-brand-lime border border-ink/30 font-bold text-ink">
+                  Demo
+                </span>
+                <span className="px-2 py-0.5 rounded text-xs font-bold bg-brand-lime border border-ink text-ink">
+                  XLM
+                </span>
+                <span className="px-2 py-0.5 rounded text-xs font-bold bg-brand-cyan border border-ink text-ink">
+                  USDC
+                </span>
+              </div>
             </div>
             <p className="text-sm text-muted mb-4 font-medium">
-              Simulate converting your USDC to Naira and sending it straight to your bank account.
+              Convert your XLM or USDC directly to Naira and send it straight to your bank account.
             </p>
             <Link
               href="/app/withdraw"
               className="btn-brutal btn-brutal-primary w-full"
             >
-              Withdraw (Demo)
+              Withdraw to Naira
             </Link>
           </div>
         </div>

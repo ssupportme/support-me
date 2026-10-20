@@ -89,7 +89,7 @@ export default function CreatorProfileClient({
   useDocumentLang(locale);
 
   return (
-    <NextIntlClientProvider locale={locale} messages={getMessages(locale)}>
+    <NextIntlClientProvider locale={locale} messages={getMessages(locale)} timeZone="UTC">
       {/* lang on the translated region too, so it is correct on first paint
           even before useDocumentLang's effect updates <html lang>. */}
       <div lang={locale}>
@@ -333,12 +333,12 @@ function CreatorProfileView({ username, locale, onLocaleChange }: CreatorProfile
         );
         setMissingTrustline(false);
       } else {
-        match = account.balances.find((b: { asset_type?: string; asset_code?: string }) => {
+        match = account.balances.find((b) => {
           if (b.asset_type === 'native') return false;
           if (asset && asset.code === code && typeof asset.balanceMatcher === 'function') {
             return asset.balanceMatcher(b);
           }
-          return b.asset_code === code;
+          return 'asset_code' in b && b.asset_code === code;
         });
         // For non-XLM assets, missing match means no trustline
         setMissingTrustline(!match);
@@ -895,7 +895,7 @@ function CreatorProfileView({ username, locale, onLocaleChange }: CreatorProfile
                         rel="noopener noreferrer"
                         className="underline"
                       >
-                        Circle's faucet
+                        Circle&apos;s faucet
                       </a>
                       . Test tokens have no real value.
                     </p>
@@ -1040,6 +1040,7 @@ function CreatorProfileView({ username, locale, onLocaleChange }: CreatorProfile
                       {recurring && (
                         <div className="flex items-center gap-1.5">
                           <select
+                            aria-label="Subscription interval"
                             value={intervalChoice}
                             onChange={(e) => setIntervalChoice(e.target.value as typeof intervalChoice)}
                             className="input-brutal text-sm py-1.5 w-auto min-h-[44px]"

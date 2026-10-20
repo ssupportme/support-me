@@ -59,7 +59,7 @@ const mockedWithServer = withSorobanRpcServer as jest.Mock;
 const mockedBalance = getAccountBalanceXlm as jest.Mock;
 
 function makeExecutor(): { keypair: Keypair; ensureExecutorFunded(): Promise<void> } {
-  const executor = new SubscriptionExecutor() as any;
+  const executor = new SubscriptionExecutor() as unknown as { keypair: Keypair; ensureExecutorFunded(): Promise<void> };
   executor.keypair = Keypair.random();
   return executor;
 }

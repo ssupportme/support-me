@@ -18,6 +18,7 @@ vi.mock('@/lib/wallet', () => ({
   connectWallet: vi.fn(),
   disconnectWallet: vi.fn(),
   signMessage: vi.fn(),
+  signTransaction: vi.fn(),
   initWallet: vi.fn(),
 }));
 

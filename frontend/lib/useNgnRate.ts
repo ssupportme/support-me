@@ -4,6 +4,7 @@ import { useEffect, useState, useCallback } from 'react';
 
 interface NgnRateData {
   rate: number;
+  xlmRate?: number;
   source: string;
   timestamp: number;
 }

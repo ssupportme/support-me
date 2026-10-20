@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import Link from 'next/link';
 import * as StellarSdk from '@stellar/stellar-sdk';
 import { useAuth } from '@/context/AuthContext';
@@ -10,6 +10,8 @@ import { AppNav } from '@/components/AppNav';
 import { Skeleton } from '@/components/Skeleton';
 import { notify } from '@/lib/notify';
 import { useNgnRate } from '@/lib/useNgnRate';
+import { usePrices } from '@/lib/usePrices';
+import ConvertXlmToUsdcModal from '@/components/ConvertXlmToUsdcModal';
 import { API_URL } from '@/lib/api';
 import { fundWithFriendbot } from '@/lib/contract';
 
@@ -22,13 +24,16 @@ const NIGERIAN_BANKS = [
 ];
 
 type Stage = 'form' | 'processing' | 'done';
+export type WithdrawAsset = 'XLM' | 'USDC';
 
 export default function WithdrawPage() {
   const { user, token } = useAuth();
   const { creator, loading: creatorLoading } = useCreator();
   const walletAddress = user?.walletAddress || '';
   const ngnRate = useNgnRate();
+  const prices = usePrices() as Record<string, number> | null;
 
+  const [selectedAsset, setSelectedAsset] = useState<WithdrawAsset>('XLM');
   const [xlmBalance, setXlmBalance] = useState<string | null>(null);
   const [usdcBalance, setUsdcBalance] = useState<string | null>(null);
   const [balancesLoading, setBalancesLoading] = useState(true);
@@ -44,23 +49,49 @@ export default function WithdrawPage() {
   const [verifying, setVerifying] = useState(false);
   const [accountName, setAccountName] = useState<string | null>(null);
   const [verifyError, setVerifyError] = useState<string | null>(null);
+  const [showConvertModal, setShowConvertModal] = useState(false);
 
+  // Check URL query parameters for pre-selected asset
   useEffect(() => {
+    try {
+      const params = new URLSearchParams(window.location.search);
+      const assetParam = params.get('asset')?.toUpperCase();
+      if (assetParam === 'XLM' || assetParam === 'USDC') {
+        setSelectedAsset(assetParam as WithdrawAsset);
+      }
+    } catch {
+      // Ignore URL parsing errors
+    }
+  }, []);
+
+  const refreshBalances = useCallback(() => {
     if (!walletAddress) { setBalancesLoading(false); return; }
+    setBalancesLoading(true);
     server.loadAccount(walletAddress)
       .then((account) => {
         setIsUnfunded(false);
         const native = account.balances.find(
           (b): b is StellarSdk.Horizon.HorizonApi.BalanceLineNative => b.asset_type === 'native'
         );
-        setXlmBalance(native ? Math.round(parseFloat(native.balance)).toString() : '0');
+        const nativeBalStr = native ? Math.round(parseFloat(native.balance)).toString() : '0';
+        setXlmBalance(nativeBalStr);
 
-        const usdcIssuer = process.env.NEXT_PUBLIC_USDC_ISSUER;
+        const currentIssuer = process.env.NEXT_PUBLIC_USDC_ISSUER;
         const usdc = account.balances.find(
           (b): b is StellarSdk.Horizon.HorizonApi.BalanceLineAsset =>
-            'asset_code' in b && b.asset_code === 'USDC' && (!usdcIssuer || b.asset_issuer === usdcIssuer)
+            'asset_code' in b && b.asset_code === 'USDC' && (!currentIssuer || b.asset_issuer === currentIssuer)
         );
-        setUsdcBalance(usdc ? Math.round(parseFloat(usdc.balance)).toString() : null);
+        const usdcBalStr = usdc ? Math.round(parseFloat(usdc.balance)).toString() : null;
+        setUsdcBalance(usdcBalStr);
+
+        // If user holds only USDC and no XLM, default to USDC.
+        // Otherwise default to XLM since creator balances default to XLM.
+        const numNative = parseFloat(nativeBalStr);
+        const numUsdc = usdcBalStr ? parseFloat(usdcBalStr) : 0;
+        if (numUsdc > 0 && numNative === 0) {
+          const params = typeof window !== 'undefined' ? new URLSearchParams(window.location.search) : null;
+          setSelectedAsset(params?.get('asset')?.toUpperCase() === 'XLM' ? 'XLM' : 'USDC');
+        }
       })
       .catch((err) => {
         const message = (err as Error)?.message || '';
@@ -75,9 +106,18 @@ export default function WithdrawPage() {
       .finally(() => setBalancesLoading(false));
   }, [walletAddress]);
 
+  useEffect(() => {
+    refreshBalances();
+  }, [refreshBalances]);
+
   const NGN_PER_USDC = ngnRate?.rate || 1380;
-  const naira = amount ? Number(amount) * NGN_PER_USDC : 0;
+  const NGN_PER_XLM = ngnRate?.xlmRate || (prices?.XLM ? Math.round(prices.XLM * NGN_PER_USDC) : 165);
+  const currentRate = selectedAsset === 'XLM' ? NGN_PER_XLM : NGN_PER_USDC;
+
+  const naira = amount ? Number(amount) * currentRate : 0;
+  const availableXlm = xlmBalance != null ? parseFloat(xlmBalance) : 0;
   const availableUsdc = usdcBalance != null ? parseFloat(usdcBalance) : 0;
+  const availableBalance = selectedAsset === 'XLM' ? availableXlm : availableUsdc;
 
   const handleFundWithFriendbot = async () => {
     if (!walletAddress) return;
@@ -151,7 +191,14 @@ export default function WithdrawPage() {
     setError(null);
     const n = Number(amount);
     if (!Number.isFinite(n) || n <= 0) { setError('Enter an amount greater than zero.'); return; }
-    if (usdcBalance !== null && n > availableUsdc) { setError('Amount exceeds your available USDC balance.'); return; }
+    if (selectedAsset === 'XLM' && xlmBalance !== null && n > availableXlm) {
+      setError('Amount exceeds your available XLM balance.');
+      return;
+    }
+    if (selectedAsset === 'USDC' && usdcBalance !== null && n > availableUsdc) {
+      setError('Amount exceeds your available USDC balance.');
+      return;
+    }
     if (!/^\d{10}$/.test(accountNo)) { setError('Enter a valid 10-digit account number.'); return; }
     if (!bank) { setError('Select your bank.'); return; }
     if (!accountName && !verifying) { setError('Please verify your account number first.'); return; }
@@ -182,7 +229,7 @@ export default function WithdrawPage() {
           amountIn: n,
           amountOut: naira || undefined,
           fee: 0,
-          currency: 'USDC',
+          currency: selectedAsset,
           anchorTxId,
           status: 'completed',
         }),
@@ -216,7 +263,7 @@ export default function WithdrawPage() {
               </span>
             </div>
             <p className="mt-1 text-sm text-muted font-medium">
-              Convert your USDC to NGN and send it to your bank account.
+              Convert your XLM or USDC directly to NGN and send it to your bank account.
             </p>
           </div>
 
@@ -252,12 +299,26 @@ export default function WithdrawPage() {
               <Skeleton className="h-10 w-48" />
             ) : (
               <div className="flex flex-wrap gap-x-6 gap-y-1">
-                <span className="text-xl font-extrabold text-ink tabular-nums">
+                <button
+                  type="button"
+                  onClick={() => { setSelectedAsset('XLM'); setAmount(''); setError(null); }}
+                  className={`text-xl font-extrabold tabular-nums cursor-pointer hover:opacity-80 transition-opacity ${
+                    selectedAsset === 'XLM' ? 'text-ink underline decoration-2 underline-offset-4' : 'text-ink/80'
+                  }`}
+                  title="Click to withdraw XLM"
+                >
                   {isUnfunded ? 'Not funded' : (xlmBalance != null ? Number(xlmBalance).toLocaleString() : '—')} <span className="text-base font-bold text-ink/70">XLM</span>
-                </span>
-                <span className="text-xl font-extrabold text-ink tabular-nums">
+                </button>
+                <button
+                  type="button"
+                  onClick={() => { setSelectedAsset('USDC'); setAmount(''); setError(null); }}
+                  className={`text-xl font-extrabold tabular-nums cursor-pointer hover:opacity-80 transition-opacity ${
+                    selectedAsset === 'USDC' ? 'text-ink underline decoration-2 underline-offset-4' : 'text-ink/80'
+                  }`}
+                  title="Click to withdraw USDC"
+                >
                   {isUnfunded ? 'Not funded' : (usdcBalance != null ? Number(usdcBalance).toLocaleString() : '—')} <span className="text-base font-bold text-ink/70">USDC</span>
-                </span>
+                </button>
               </div>
             )}
             {isUnfunded && !balancesLoading && (
@@ -283,9 +344,15 @@ export default function WithdrawPage() {
                   This transaction has been persisted to your withdrawal history.
                 </p>
               </div>
-              <div className="rounded-xl bg-background border-2 border-ink/10 p-3 text-sm">
-                <span className="text-muted font-medium">Reference</span>{' '}
-                <span className="font-mono font-bold">{ref}</span>
+              <div className="rounded-xl bg-background border-2 border-ink/10 p-3 text-sm space-y-1">
+                <div>
+                  <span className="text-muted font-medium">Withdrawn</span>{' '}
+                  <span className="font-bold text-ink">{amount} {selectedAsset}</span>
+                </div>
+                <div>
+                  <span className="text-muted font-medium">Reference</span>{' '}
+                  <span className="font-mono font-bold">{ref}</span>
+                </div>
               </div>
               <div className="flex flex-col sm:flex-row gap-3">
                 <Link
@@ -304,15 +371,78 @@ export default function WithdrawPage() {
             </div>
           ) : (
             <form onSubmit={submit} className="card-brutal p-6 space-y-4">
+              {/* Asset Selector */}
               <div>
-                <label className="block text-sm font-bold text-ink mb-1.5" htmlFor="amt">
-                  Amount (USDC)
+                <label className="block text-sm font-bold text-ink mb-1.5">
+                  Asset to cash out
                 </label>
+                <div className="grid grid-cols-2 gap-3" role="radiogroup" aria-label="Select asset to withdraw">
+                  <button
+                    type="button"
+                    role="radio"
+                    aria-checked={selectedAsset === 'XLM'}
+                    onClick={() => { setSelectedAsset('XLM'); setAmount(''); setError(null); }}
+                    className={`p-3 rounded-xl border-2 font-bold text-left transition-all cursor-pointer ${
+                      selectedAsset === 'XLM'
+                        ? 'bg-brand-lime border-ink shadow-[2px_2px_0px_0px_rgba(0,0,0,1)] text-ink'
+                        : 'bg-card border-ink/20 hover:border-ink/50 text-ink/80'
+                    }`}
+                  >
+                    <div className="flex items-center justify-between">
+                      <span className="text-base font-extrabold">XLM</span>
+                      <span className="text-xs px-2 py-0.5 rounded bg-white/70 border border-ink/20 text-ink">
+                        Native
+                      </span>
+                    </div>
+                    <p className="text-xs text-ink/70 mt-1 font-medium">
+                      Bal: {xlmBalance != null ? Number(xlmBalance).toLocaleString() : '—'} XLM
+                    </p>
+                  </button>
+
+                  <button
+                    type="button"
+                    role="radio"
+                    aria-checked={selectedAsset === 'USDC'}
+                    onClick={() => { setSelectedAsset('USDC'); setAmount(''); setError(null); }}
+                    className={`p-3 rounded-xl border-2 font-bold text-left transition-all cursor-pointer ${
+                      selectedAsset === 'USDC'
+                        ? 'bg-brand-cyan border-ink shadow-[2px_2px_0px_0px_rgba(0,0,0,1)] text-ink'
+                        : 'bg-card border-ink/20 hover:border-ink/50 text-ink/80'
+                    }`}
+                  >
+                    <div className="flex items-center justify-between">
+                      <span className="text-base font-extrabold">USDC</span>
+                      <span className="text-xs px-2 py-0.5 rounded bg-white/70 border border-ink/20 text-ink">
+                        Stablecoin
+                      </span>
+                    </div>
+                    <p className="text-xs text-ink/70 mt-1 font-medium">
+                      Bal: {usdcBalance != null ? Number(usdcBalance).toLocaleString() : '—'} USDC
+                    </p>
+                  </button>
+                </div>
+              </div>
+
+              <div>
+                <div className="flex items-center justify-between mb-1.5">
+                  <label className="block text-sm font-bold text-ink" htmlFor="amt">
+                    Amount ({selectedAsset})
+                  </label>
+                  {availableBalance > 0 && (
+                    <button
+                      type="button"
+                      onClick={() => setAmount(availableBalance.toString())}
+                      className="text-xs font-bold text-primary hover:underline cursor-pointer"
+                    >
+                      Max ({availableBalance.toLocaleString()} {selectedAsset})
+                    </button>
+                  )}
+                </div>
                 <input
                   id="amt"
                   className="input-brutal"
                   inputMode="decimal"
-                  placeholder="100.00"
+                  placeholder={selectedAsset === 'XLM' ? '100' : '50.00'}
                   value={amount}
                   onChange={(e) => setAmount(e.target.value)}
                   disabled={stage === 'processing'}
@@ -322,7 +452,7 @@ export default function WithdrawPage() {
                     <p>
                       You&apos;ll receive ≈{' '}
                       <span className="font-bold text-ink">₦{naira.toLocaleString()}</span>{' '}
-                      <span className="text-muted">(₦{NGN_PER_USDC.toLocaleString()}/USDC)</span>
+                      <span className="text-muted">(₦{currentRate.toLocaleString()}/{selectedAsset})</span>
                     </p>
                     {ngnRate?.ageMinutes != null && (
                       <p className="text-xs mt-0.5">
@@ -334,6 +464,26 @@ export default function WithdrawPage() {
                     )}
                   </div>
                 )}
+              </div>
+
+              <div className="rounded-xl border border-ink/15 bg-background p-3 text-xs text-muted font-medium space-y-1">
+                <div className="flex items-center justify-between">
+                  <p className="text-ink font-bold">
+                    ✓ Direct {selectedAsset} cash-out enabled
+                  </p>
+                  {selectedAsset === 'XLM' && (
+                    <button
+                      type="button"
+                      onClick={() => setShowConvertModal(true)}
+                      className="text-xs font-bold text-primary hover:underline cursor-pointer"
+                    >
+                      Swap XLM to USDC
+                    </button>
+                  )}
+                </div>
+                <p>
+                  Your {selectedAsset} will be converted directly to Naira at the market rate (no prior swap to USDC required).
+                </p>
               </div>
 
               <div>
@@ -398,6 +548,15 @@ export default function WithdrawPage() {
           )}
         </div>
       </div>
+
+      {showConvertModal && (
+        <ConvertXlmToUsdcModal
+          open={showConvertModal}
+          onClose={() => setShowConvertModal(false)}
+          maxXlm={xlmBalance ? Number(xlmBalance) : 0}
+          onSuccess={refreshBalances}
+        />
+      )}
     </ProtectedRoute>
   );
 }

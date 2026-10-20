@@ -363,6 +363,50 @@ How to fix it:
    subscription can still show as active until the backend's event listener
    catches up. Refresh after a minute.
 
+
+### Account not funded
+
+Your wallet address does not exist on the Stellar network yet because it has not received an initial funding transaction. On the testnet, accounts must be created and funded with XLM before they can hold balances or submit transactions.
+
+Likely causes:
+
+- The wallet is newly created and has not yet been funded by Friendbot.
+- A testnet reset wiped existing testnet accounts.
+
+How to fix it:
+
+1. Click **Fund with Friendbot** on the donate or withdraw card to fund your account automatically.
+2. Alternatively, fund it manually by visiting `https://friendbot.stellar.org/?addr=<YOUR_WALLET_ADDRESS>`.
+3. Once funded, refresh the page and try again.
+
+### Testnet reset
+
+The Stellar Development Foundation periodically resets the public testnet, clearing all state, contracts, and accounts.
+
+Likely causes:
+
+- A testnet reset occurred and the contracts are being redeployed.
+- The deployed contract ID is no longer present on the testnet ledger.
+
+How to fix it:
+
+1. Follow the [Testnet reset runbook](#testnet-reset-runbook) if you are running a deployment.
+2. As a supporter or creator, check back later once the testnet contracts have been redeployed.
+
+### Missing trustline
+
+You attempted to hold, receive, or donate an asset (such as USDC or USDT) for which your Stellar account does not yet have an established trustline.
+
+Likely causes:
+
+- Your wallet has never held or received this asset before.
+- The asset's issuer is not yet trusted by your account.
+
+How to fix it:
+
+1. Click the trustline prompt on the donate card or creator profile to add the required trustline.
+2. In your wallet extension (e.g. Freighter, LOBSTR, xBull), add the asset and trustline.
+3. Ensure you have sufficient XLM to cover the 0.5 XLM reserve requirement for adding a trustline.
 ## Reading a raw "Transaction rejected" message
 
 When simulation fails, Soroban RPC returns a host error. The frontend shows it

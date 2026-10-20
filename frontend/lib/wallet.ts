@@ -4,6 +4,7 @@ import { xBullModule } from '@creit.tech/stellar-wallets-kit/modules/xbull';
 import { AlbedoModule } from '@creit.tech/stellar-wallets-kit/modules/albedo';
 import { RabetModule } from '@creit.tech/stellar-wallets-kit/modules/rabet';
 import { LobstrModule } from '@creit.tech/stellar-wallets-kit/modules/lobstr';
+import * as StellarSdk from '@stellar/stellar-sdk';
 
 const NETWORK_PASSPHRASE = Networks.TESTNET;
 

@@ -137,6 +137,7 @@ const creator = {
   acceptsUsdc: true,
   acceptsUsdt: false,
   socialLinks: null,
+  presetAmounts: [],
 };
 
 const donation = {
@@ -509,7 +510,7 @@ describe('DashboardPage', () => {
     render(<DashboardPage />);
     await waitFor(() => expect(screen.getByText('page 1 tip')).toBeInTheDocument());
 
-    expect(FakeIntersectionObserver.instances.length).toBeGreaterThan(0);
+    await waitFor(() => expect(FakeIntersectionObserver.instances.length).toBeGreaterThan(0));
     const observer = FakeIntersectionObserver.instances[FakeIntersectionObserver.instances.length - 1];
 
     act(() => {
