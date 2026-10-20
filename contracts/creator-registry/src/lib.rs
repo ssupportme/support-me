@@ -441,8 +441,17 @@ impl CreatorRegistryContract {
                 env.storage().instance().set(&THRESHOLD_KEY, &new_threshold);
             }
             // Rejected in `propose_admin_action`; refuse to mark them executed
-            // in case one was stored before that check existed.
-            AdminAction::SetExecutor(_) | AdminAction::Pause | AdminAction::Unpause => {
+            // in case one was stored before that check existed. The token
+            // allowlist and donation-limit actions (#284) are donation
+            // contract concepts with no equivalent here, same as pause and
+            // the executor.
+            AdminAction::SetExecutor(_)
+            | AdminAction::Pause
+            | AdminAction::Unpause
+            | AdminAction::AddAllowedToken(_)
+            | AdminAction::RemoveAllowedToken(_)
+            | AdminAction::SetMinDonation(_)
+            | AdminAction::SetMaxDonation(_) => {
                 panic_with_error!(&env, RegistryError::UnsupportedAction);
             }
         }
@@ -661,7 +670,13 @@ impl CreatorRegistryContract {
             | AdminAction::AddAdmin(_)
             | AdminAction::RemoveAdmin(_)
             | AdminAction::SetThreshold(_) => true,
-            AdminAction::SetExecutor(_) | AdminAction::Pause | AdminAction::Unpause => false,
+            AdminAction::SetExecutor(_)
+            | AdminAction::Pause
+            | AdminAction::Unpause
+            | AdminAction::AddAllowedToken(_)
+            | AdminAction::RemoveAllowedToken(_)
+            | AdminAction::SetMinDonation(_)
+            | AdminAction::SetMaxDonation(_) => false,
         }
     }
 
