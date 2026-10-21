@@ -35,7 +35,8 @@ export const SOCIAL_PLATFORMS: SocialPlatform[] = [
 /**
  * Turn a user's raw input into a full URL for storage. A pasted http(s) URL is
  * kept verbatim; a bare handle gets the platform prefix (with any leading @
- * stripped, since prefixes already end in /). Empty input returns ''.
+ * stripped, since the prefix already carries it — either `/` for most
+ * platforms or `/@` for YouTube and TikTok). Empty input returns ''.
  */
 export function normalizeSocialValue(platform: SocialPlatform, raw: string): string {
   const value = raw.trim();

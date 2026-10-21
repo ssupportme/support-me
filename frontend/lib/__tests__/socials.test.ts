@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { isHttpUrl, normalizeSocialValue, SOCIAL_PLATFORMS } from '@/lib/socials';
+import { getPlatform, isHttpUrl, normalizeSocialValue, SOCIAL_PLATFORMS } from '@/lib/socials';
 
 describe('social URL validation', () => {
   it.each(['https://example.com', 'http://example.com/path'])('accepts %s', (value) => {
@@ -38,5 +38,21 @@ describe('social URL validation', () => {
 
   it.each(SOCIAL_PLATFORMS)('returns empty for blank input on %s', (platform) => {
     expect(normalizeSocialValue(platform, '   ')).toBe('');
+  });
+});
+
+describe('getPlatform', () => {
+  it.each(SOCIAL_PLATFORMS)('finds the %s platform by key', (platform) => {
+    expect(getPlatform(platform.key)).toBe(platform);
+  });
+
+  it('returns undefined for an unknown key', () => {
+    expect(getPlatform('mastodon')).toBeUndefined();
+    expect(getPlatform('')).toBeUndefined();
+  });
+
+  it('keeps the @ in the YouTube and TikTok prefixes', () => {
+    expect(getPlatform('youtube')?.prefix).toBe('https://www.youtube.com/@');
+    expect(getPlatform('tiktok')?.prefix).toBe('https://www.tiktok.com/@');
   });
 });
