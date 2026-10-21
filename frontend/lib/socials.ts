@@ -24,8 +24,8 @@ export interface SocialPlatform {
 export const SOCIAL_PLATFORMS: SocialPlatform[] = [
   { key: 'twitter', label: 'X / Twitter', icon: NewTwitterIcon, placeholder: 'username', prefix: 'https://x.com/' },
   { key: 'instagram', label: 'Instagram', icon: InstagramIcon, placeholder: 'username', prefix: 'https://instagram.com/' },
-  { key: 'youtube', label: 'YouTube', icon: YoutubeIcon, placeholder: '@channel', prefix: 'https://youtube.com/' },
-  { key: 'tiktok', label: 'TikTok', icon: TiktokIcon, placeholder: '@username', prefix: 'https://tiktok.com/' },
+  { key: 'youtube', label: 'YouTube', icon: YoutubeIcon, placeholder: '@channel', prefix: 'https://www.youtube.com/@' },
+  { key: 'tiktok', label: 'TikTok', icon: TiktokIcon, placeholder: '@username', prefix: 'https://www.tiktok.com/@' },
   { key: 'github', label: 'GitHub', icon: Github01Icon, placeholder: 'username', prefix: 'https://github.com/' },
   { key: 'linkedin', label: 'LinkedIn', icon: Linkedin01Icon, placeholder: 'in/username', prefix: 'https://linkedin.com/' },
   { key: 'telegram', label: 'Telegram', icon: TelegramIcon, placeholder: 'username', prefix: 'https://t.me/' },
