@@ -29,3 +29,12 @@ skills-lock.json
 # Sentry scaffolded examples
 frontend/app/api/sentry-example-api/
 frontend/app/sentry-example-page/
+
+# One-off merge-conflict scratch files (root only; see issue #362)
+/extract.py
+/fix_both.py
+/fix_conflicts.py
+/fix_vec.py
+/resolve.py
+/resolve_tests.py
+/pr.md
