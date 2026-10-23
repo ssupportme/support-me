@@ -256,7 +256,7 @@ export default function SettingsPage() {
 
     setUploading(true);
     try {
-      const url = await uploadAvatar(file);
+      const url = await uploadAvatar(file, token);
       setAvatarUrl(url);
       setDirty(true);
       notify.success('Avatar uploaded — save to keep it.');
