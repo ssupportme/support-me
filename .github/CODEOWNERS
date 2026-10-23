@@ -1,0 +1,9 @@
+# Default owner for changes that do not match a more specific rule.
+* @sammajayi
+
+# Security-sensitive and release-affecting paths.
+/contracts/ @sammajayi
+/backend/src/middleware/ @sammajayi
+/backend/src/routes/auth.ts @sammajayi
+/.github/ @sammajayi
+/SECURITY.md @sammajayi
