@@ -1,5 +1,6 @@
 import express from "express";
 import cors from "cors";
+import helmet from "helmet";
 import * as Sentry from "@sentry/node";
 import authRouter from "./routes/auth";
 import creatorsRouter from "./routes/creators";
@@ -30,6 +31,73 @@ export const sorobanRpcCache = new TtlCache<{ status: "ok" | "down"; latencyMs?:
 export const healthIpLimiter = new RateLimiter(rateLimits.health.ipMax, rateLimits.health.windowMs);
 
 const app = express();
+
+/**
+ * Security headers via helmet.
+ *
+ * The API serves JSON only — no images, scripts, or styles — so the defaults
+ * are tightened rather than loosened. Notable overrides:
+ *
+ * - contentSecurityPolicy: restrict to 'self' for everything; the API has no
+ *   inline scripts or styles. This protects against reflected XSS in any
+ *   error response that might accidentally render HTML.
+ * - frameguard: DENY — the API should never be framed (clickjacking).
+ * - crossOriginResourcePolicy: same-origin — prevents other origins from
+ *   embedding API responses via <script> or <link>.
+ * - Strict-Transport-Security: 2 years with preload and subdomains.
+ *
+ * The CSP is in report-only mode initially; flip ENFORCE_CSP to enforce.
+ */
+const ENFORCE_CSP = process.env.ENFORCE_CSP === "true";
+
+app.use(
+  helmet({
+    contentSecurityPolicy: ENFORCE_CSP
+      ? {
+          directives: {
+            defaultSrc: ["'self'"],
+            scriptSrc: ["'self'"],
+            styleSrc: ["'self'"],
+            imgSrc: ["'self'"],
+            fontSrc: ["'self'"],
+            connectSrc: ["'self'"],
+            frameAncestors: ["'none'"],
+            formAction: ["'self'"],
+            baseUri: ["'self'"],
+            objectSrc: ["'none'"],
+          },
+        }
+      : false,
+    // While in report-only mode, still set the other security headers
+    contentSecurityPolicyReportOnly: !ENFORCE_CSP
+      ? {
+          directives: {
+            defaultSrc: ["'self'"],
+            scriptSrc: ["'self'"],
+            styleSrc: ["'self'"],
+            imgSrc: ["'self'"],
+            fontSrc: ["'self'"],
+            connectSrc: ["'self'"],
+            frameAncestors: ["'none'"],
+            formAction: ["'self'"],
+            baseUri: ["'self'"],
+            objectSrc: ["'none'"],
+          },
+        }
+      : false,
+    // No need for COOP/COEP — the API doesn't use SharedArrayBuffer
+    crossOriginOpenerPolicy: { policy: "same-origin" },
+    crossOriginEmbedderPolicy: false,
+    crossOriginResourcePolicy: { policy: "same-origin" },
+    // HSTS: 2 years, include subdomains, preload
+    strictTransportSecurity: {
+      maxAge: 63072000,
+      includeSubDomains: true,
+      preload: true,
+    },
+    frameguard: { action: "deny" },
+  }),
+);
 
 /**
  * CORS is restricted to an explicit allowlist of frontend origins (#179).

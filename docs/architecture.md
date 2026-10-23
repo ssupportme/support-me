@@ -230,6 +230,60 @@ and muxed (`M...`) accounts. Contract accounts (`C...`, smart wallets) would
 require SEP-45 (Soroban authorization entries verified via RPC), which is not
 implemented — sufficient for the Freighter `G...` account used on testnet.
 
+## Security Headers
+
+The frontend (Next.js) and backend (Express) both set a comprehensive set of
+security headers to protect against XSS, clickjacking, and protocol downgrade
+attacks.
+
+### Content-Security-Policy (CSP)
+
+The CSP is rolled out in **Report-Only mode** first
+(`Content-Security-Policy-Report-Only`) so violations are logged to the browser
+console without blocking functionality. Once no violations appear during
+normal usage (wallet connect, donate, avatar upload, Sentry), set
+`ENFORCE_CSP=true` in the environment to switch to enforcement.
+
+#### Allowed Origins
+
+| Directive | Allowed Origins | Reason |
+| --- | --- | --- |
+| `default-src` | `'self'` | Same-origin for all resource types |
+| `script-src` | `'self'`, `'unsafe-inline'`, `stellarwalletskit.com` | Next.js hydration + Stellar Wallet Kit |
+| `style-src` | `'self'`, `'unsafe-inline'` | Next.js CSS-in-JS |
+| `img-src` | `'self'`, `res.cloudinary.com`, `data:` | Cloudinary avatars + inline data URIs |
+| `connect-src` | `'self'`, `horizon-testnet.stellar.org`, `soroban-testnet.stellar.org`, `stellarwalletskit.com`, `freighter.app` | API + SSE + Stellar RPC + wallet providers |
+| `frame-ancestors` | `'none'` | Clickjacking protection (blocks all framing) |
+| `form-action` | `'self'` | Prevents form submission to external origins |
+| `base-uri` | `'self'` | Prevents base-hijacking |
+| `object-src` | `'none'` | No plugins/Flash |
+
+**Frontend** (`frontend/next.config.ts`): Headers are set via the Next.js
+`headers()` config, applied to all routes (`/:path*`).
+
+**Backend** (`backend/src/app.ts`): Uses `helmet` with API-appropriate settings
+— no inline scripts, no frames, HSTS with preload, COOP same-origin, CORP
+same-origin.
+
+### Additional Security Headers
+
+| Header | Value | Purpose |
+| --- | --- | --- |
+| `X-Content-Type-Options` | `nosniff` | Prevents MIME-type sniffing |
+| `Referrer-Policy` | `strict-origin-when-cross-origin` | Limits referrer info to same-origin |
+| `Permissions-Policy` | `camera=(), microphone=(), geolocation=(), browsing-topics=()` | Disables sensitive browser APIs |
+| `Strict-Transport-Security` | `max-age=63072000; includeSubDomains; preload` | Forces HTTPS for 2 years |
+| `X-Frame-Options` | `DENY` | Redundant with CSP frame-ancestors for older browsers |
+
+### Embeddable Widget Exception
+
+The embeddable donation widget (`docs/design/donation-widget.md`) uses an
+iframe on the `/{username}/embed` route. If this route needs to be framed by
+creator sites, add a **narrow exception** to `frame-ancestors` (e.g.
+`frame-ancestors 'self' https://creator-site.example`) rather than opening it
+to all origins. The `X-Frame-Options` header would also need to be updated to
+`ALLOW-FROM` for that specific route.
+
 ## Contribution Focus Areas
 
 - Add pagination and filtering for dashboards and donation history
