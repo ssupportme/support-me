@@ -131,6 +131,26 @@ describe('CreateUsernamePage', () => {
     expect(screen.getByLabelText('Username')).toHaveAttribute('aria-invalid', 'true');
   });
 
+  it('shows the server validation detail for a reserved username', async () => {
+    const user = userEvent.setup();
+    vi.stubGlobal(
+      'fetch',
+      mockFetch(false, {
+        error: 'Validation failed',
+        code: 'VALIDATION_ERROR',
+        details: [{ path: 'username', message: 'This username is reserved. Please choose a different one.' }],
+      })
+    );
+    render(<CreateUsernamePage />);
+
+    await user.type(screen.getByLabelText('Username'), 'admin');
+    await user.click(screen.getByRole('button', { name: /create profile/i }));
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      'This username is reserved. Please choose a different one.'
+    );
+  });
+
   it('builds the URL prefix from NEXT_PUBLIC_SITE_URL', () => {
     render(<CreateUsernamePage />);
 

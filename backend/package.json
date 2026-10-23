@@ -19,6 +19,7 @@
     "test:integration": "node test-integration.mjs",
     "lint": "eslint .",
     "prisma:seed": "ts-node --transpile-only prisma/seed.ts",
+    "report:reserved-usernames": "ts-node --transpile-only src/scripts/reportReservedUsernames.ts",
     "test:testnet": "ts-node-dev --transpile-only ../testnet-integration/runner.ts"
   },
   "prisma": {

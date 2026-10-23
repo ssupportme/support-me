@@ -305,7 +305,12 @@ router.post(
       throw new UnauthorizedError("User not authenticated");
     }
 
-    const existing = await prisma.creator.findUnique({ where: { username } });
+    // Usernames are display names but route segments: "Alice" and "alice"
+    // would otherwise be two profiles at the same URL once the frontend
+    // lowercases links (#387). Compare case-insensitively.
+    const existing = await prisma.creator.findFirst({
+      where: { username: { equals: username, mode: "insensitive" } },
+    });
     if (existing) {
       throw new ConflictError("Username already exists");
     }
