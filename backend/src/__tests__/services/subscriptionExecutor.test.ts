@@ -4,6 +4,7 @@ jest.mock("../../prisma", () => ({
     subscription: {
       findMany: jest.fn(),
       update: jest.fn(),
+      updateMany: jest.fn(),
     },
     donation: {
       upsert: jest.fn(),
@@ -27,7 +28,10 @@ jest.mock("../../services/donationNotifications", () => ({
 
 import { Subscription } from "@prisma/client";
 import prisma from "../../prisma";
-import { SubscriptionExecutor } from "../../services/subscriptionExecutor";
+import {
+  SubscriptionExecutor,
+  SUBSCRIPTION_CLAIM_TTL_MS,
+} from "../../services/subscriptionExecutor";
 import {
   notifySubscriptionPaymentFailed,
   notifySubscriptionRenewed,
@@ -45,7 +49,7 @@ type ExecutorTestAccess = {
 };
 
 const mockedPrisma = prisma as unknown as {
-  subscription: { findMany: jest.Mock; update: jest.Mock };
+  subscription: { findMany: jest.Mock; update: jest.Mock; updateMany: jest.Mock };
   donation: { upsert: jest.Mock };
   $transaction: jest.Mock;
 };
@@ -174,5 +178,115 @@ describe("SubscriptionExecutor executor-side failures (#279)", () => {
     expect(mockedPrisma.subscription.update.mock.calls[0][0].data).toEqual(
       expect.objectContaining({ failureCount: 1 })
     );
+  });
+});
+
+describe("SubscriptionExecutor multi-instance claim and expiry (#394)", () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+    mockedPrisma.donation.upsert.mockResolvedValue({ id: 1 });
+    mockedPrisma.subscription.update.mockResolvedValue(subscription);
+    mockedPrisma.$transaction.mockImplementation(
+      async (callback: ((client: typeof mockedPrisma) => Promise<unknown>) | Promise<unknown>[]) => {
+        if (typeof callback === "function") {
+          return callback(mockedPrisma);
+        }
+        return Promise.all(callback);
+      }
+    );
+    mockedRenewed.mockResolvedValue(undefined);
+    mockedApplyToGoals.mockResolvedValue([]);
+    mockedNotifyGoalsReached.mockResolvedValue(undefined);
+  });
+
+  it("submits charge_subscription only once when two executor instances tick concurrently", async () => {
+    let rowNextChargeAt = new Date(0);
+    const rowActive = true;
+
+    mockedPrisma.subscription.findMany.mockImplementation(async ({ where }) => {
+      const cutoff: Date = where?.nextChargeAt?.lte ?? new Date();
+      if (rowActive && rowNextChargeAt.getTime() <= cutoff.getTime()) {
+        return [{ ...subscription, nextChargeAt: new Date(rowNextChargeAt) }];
+      }
+      return [];
+    });
+
+    mockedPrisma.subscription.updateMany.mockImplementation(async ({ where, data }) => {
+      const cutoff: Date = where?.nextChargeAt?.lte ?? new Date();
+      if (
+        where?.id === subscription.id &&
+        rowActive &&
+        rowNextChargeAt.getTime() <= cutoff.getTime()
+      ) {
+        rowNextChargeAt = new Date(data.nextChargeAt);
+        return { count: 1 };
+      }
+      return { count: 0 };
+    });
+
+    mockedPrisma.subscription.update.mockImplementation(async ({ data }) => {
+      if (data.nextChargeAt) {
+        rowNextChargeAt = new Date(data.nextChargeAt);
+      }
+      return { ...subscription, nextChargeAt: rowNextChargeAt };
+    });
+
+    const executorA = new SubscriptionExecutor();
+    const executorB = new SubscriptionExecutor();
+    const submitA = jest.fn().mockResolvedValue("tx-from-a");
+    const submitB = jest.fn().mockResolvedValue("tx-from-b");
+    (executorA as unknown as ExecutorTestAccess).submitCharge = submitA;
+    (executorB as unknown as ExecutorTestAccess).submitCharge = submitB;
+
+    await Promise.all([executorA.tick(), executorB.tick()]);
+
+    expect(submitA.mock.calls.length + submitB.mock.calls.length).toBe(1);
+    expect(mockedPrisma.subscription.updateMany).toHaveBeenCalledTimes(2);
+  });
+
+  it("allows a subsequent tick to re-claim and charge a subscription after an abandoned claim expires", async () => {
+    const baseTime = new Date("2026-05-01T00:00:00.000Z");
+    let currentTime = baseTime.getTime();
+    const dateSpy = jest.spyOn(Date, "now").mockImplementation(() => currentTime);
+
+    let rowNextChargeAt = new Date(baseTime.getTime() - 1_000);
+    const rowActive = true;
+
+    mockedPrisma.subscription.findMany.mockImplementation(async () => {
+      if (rowActive && rowNextChargeAt.getTime() <= currentTime) {
+        return [{ ...subscription, nextChargeAt: new Date(rowNextChargeAt) }];
+      }
+      return [];
+    });
+
+    mockedPrisma.subscription.updateMany.mockImplementation(async ({ data }) => {
+      if (rowActive && rowNextChargeAt.getTime() <= currentTime) {
+        rowNextChargeAt = new Date(data.nextChargeAt);
+        return { count: 1 };
+      }
+      return { count: 0 };
+    });
+
+    // Simulate Instance 1 claiming the row and crashing before submitCharge/update finishes:
+    rowNextChargeAt = new Date(currentTime + SUBSCRIPTION_CLAIM_TTL_MS);
+
+    const recoveryExecutor = new SubscriptionExecutor();
+    const submitRecovery = jest.fn().mockResolvedValue("tx-recovered");
+    (recoveryExecutor as unknown as ExecutorTestAccess).submitCharge = submitRecovery;
+
+    try {
+      // Before lease expiry: tick sees no due subscription and does not double-charge.
+      currentTime = baseTime.getTime() + SUBSCRIPTION_CLAIM_TTL_MS - 1_000;
+      await recoveryExecutor.tick();
+      expect(submitRecovery).not.toHaveBeenCalled();
+
+      // After lease expiry: tick re-claims the expired lease and charges the subscription.
+      currentTime = baseTime.getTime() + SUBSCRIPTION_CLAIM_TTL_MS + 1_000;
+      rowNextChargeAt = new Date(Date.now() - 1_000);
+      await recoveryExecutor.tick();
+      expect(submitRecovery).toHaveBeenCalledTimes(1);
+    } finally {
+      dateSpy.mockRestore();
+    }
   });
 });

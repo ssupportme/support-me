@@ -125,6 +125,13 @@ graph TB
   - All backend Soroban reads (health, event polling, and subscription
     execution) share `services/sorobanRpc.ts`, which supports
     `SOROBAN_RPC_URLS` and logs the endpoint that served each request.
+  - `SubscriptionExecutor` (`services/subscriptionExecutor.ts`) coordinates
+    recurring charges across multiple API instances (horizontal scale-out or
+    rolling deploys) by atomically claiming each due `Subscription` row in
+    PostgreSQL with a bounded lease (`SUBSCRIPTION_CLAIM_TTL_MS`) before
+    submitting `charge_subscription`; if an instance crashes mid-charge, the
+    lease expires automatically so a subsequent tick can recover and charge the
+    subscription.
   - Privileged admin access and state-changing admin actions are recorded in
     the append-only `AdminAuditLog` table and exposed at
     `/api/admin/audit-logs`.
