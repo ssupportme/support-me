@@ -364,6 +364,32 @@ describe('DashboardPage', () => {
     await waitFor(() => expect(FakeEventSource.instances.length).toBe(1));
   });
 
+  it('excludes non-completed/unverified withdrawals from the Withdrawn card total (#393)', async () => {
+    const pendingWithdrawal = {
+      ...withdrawal,
+      id: 2,
+      amountIn: 999,
+      anchorTxId: 'anchor-pending',
+      stellarTxId: null,
+      status: 'pending_anchor',
+    };
+    mockFetchByUrl({
+      creator,
+      donations: [donation],
+      withdrawals: [withdrawal, pendingWithdrawal],
+    });
+
+    render(<DashboardPage />);
+
+    await waitFor(() => expect(screen.getByText('Dashboard')).toBeInTheDocument());
+
+    // Only the completed 12 USDC withdrawal is counted in the Withdrawn total card.
+    expect(screen.getByText('Withdrawn').parentElement).toHaveTextContent('12 USDC');
+    expect(screen.getByText('Withdrawn').parentElement).not.toHaveTextContent('1011 USDC');
+
+    await waitFor(() => expect(FakeEventSource.instances.length).toBe(1));
+  });
+
   it('prompts profile creation when the user has no creator profile yet', async () => {
     mockFetchByUrl({ creatorNotFound: true });
 

@@ -358,13 +358,14 @@ export default function DashboardPage() {
     );
   }
 
-  // Total cashed out, by asset withdrawn. Kept separate from the received-volume
-  // cards above so those stay a clean lifetime-received figure.
-  const withdrawnByCurrency = withdrawals.reduce<Record<string, number>>((acc, w) => {
+  // Total cashed out, by asset withdrawn. Only verified completed withdrawals
+  // count toward the headline Withdrawn totals (#393).
+  const completedWithdrawals = withdrawals.filter((w) => w.status === 'completed');
+  const withdrawnByCurrency = completedWithdrawals.reduce<Record<string, number>>((acc, w) => {
     acc[w.currency] = (acc[w.currency] || 0) + w.amountIn;
     return acc;
   }, {});
-  const withdrawnTotal = withdrawals.reduce((sum, w) => sum + w.amountIn, 0);
+  const withdrawnTotal = completedWithdrawals.reduce((sum, w) => sum + w.amountIn, 0);
 
   // Merge tips and cash-outs into one time-ordered feed.
   const activity: ActivityItem[] = [

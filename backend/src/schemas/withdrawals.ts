@@ -1,6 +1,23 @@
 import { z } from "zod";
 import { assetCode, txHash } from "./common";
 
+export const WITHDRAWAL_STATUSES = [
+  "completed",
+  "pending_anchor",
+  "pending_user_transfer_start",
+  "pending_user_transfer_complete",
+  "pending_external",
+  "pending_stellar",
+  "pending_trust",
+  "pending_user",
+  "incomplete",
+  "refunded",
+  "expired",
+  "error",
+] as const;
+
+export type WithdrawalStatus = (typeof WITHDRAWAL_STATUSES)[number];
+
 export const listWithdrawalsQuerySchema = z.object({
   creatorUsername: z.string().optional(),
 });
@@ -13,5 +30,5 @@ export const createWithdrawalSchema = z.object({
   currency: assetCode.default("USDC"),
   anchorTxId: z.string().min(1, "anchorTxId is required").max(128),
   stellarTxId: txHash.optional(),
-  status: z.string().min(1).max(32).default("completed"),
+  status: z.enum(WITHDRAWAL_STATUSES).default("completed"),
 });

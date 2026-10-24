@@ -129,10 +129,54 @@ router.get(
         : {}),
     };
 
-    const orderBy =
-      sort === "most-supported"
-        ? { donations: { _count: "desc" as const } }
-        : { createdAt: "desc" as const };
+    if (sort === "most-supported") {
+      const orderBy: Prisma.CreatorOrderByWithRelationInput[] = [
+        { donations: { _count: "desc" as const } },
+        { id: "asc" as const },
+      ];
+
+      const [allMatchingCreators, total] = await Promise.all([
+        prisma.creator.findMany({
+          where,
+          orderBy,
+          include: {
+            _count: { select: { donations: { where: { verified: true } } } },
+          },
+        }),
+        prisma.creator.count({ where }),
+      ]);
+
+      // Prisma's relation _count orderBy counts all donation rows (including
+      // unverified ones), whereas _count.donations in the response counts only
+      // verified donations. Sort by verified donation count with a deterministic
+      // id tiebreaker so unverified rows cannot inflate rank and pagination is stable.
+      const rankedCreators = [...allMatchingCreators].sort((a, b) => {
+        const verifiedDiff = (b._count?.donations ?? 0) - (a._count?.donations ?? 0);
+        if (verifiedDiff !== 0) return verifiedDiff;
+        return a.id - b.id;
+      });
+
+      const offset = (page - 1) * limit;
+      const pagedCreators =
+        rankedCreators.length > offset
+          ? rankedCreators.slice(offset, offset + limit)
+          : rankedCreators.slice(0, limit);
+
+      return res.json({
+        items: pagedCreators.map(formatCreator),
+        pagination: {
+          page,
+          limit,
+          total,
+          totalPages: Math.ceil(total / limit),
+        },
+      });
+    }
+
+    const orderBy: Prisma.CreatorOrderByWithRelationInput[] = [
+      { createdAt: "desc" as const },
+      { id: "desc" as const },
+    ];
 
     const [creators, total] = await Promise.all([
       prisma.creator.findMany({
