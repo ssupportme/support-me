@@ -40,7 +40,7 @@ const mockedPrisma = prisma as unknown as {
 };
 
 describe("GET /api/creators", () => {
-  it("lists creators, newest first by default", async () => {
+  it("lists creators, newest first by default with a deterministic id tiebreaker", async () => {
     const creators = [{ id: 1, username: "bob", _count: { donations: 0 } }];
     mockedPrisma.creator.findMany.mockResolvedValue(creators);
     mockedPrisma.creator.count.mockResolvedValue(1);
@@ -53,11 +53,14 @@ describe("GET /api/creators", () => {
       pagination: { page: 1, limit: 20, total: 1, totalPages: 1 },
     });
     expect(mockedPrisma.creator.findMany).toHaveBeenCalledWith(
-      expect.objectContaining({ orderBy: { createdAt: "desc" }, where: { walletAddress: { not: null } } })
+      expect.objectContaining({
+        orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+        where: { walletAddress: { not: null } },
+      })
     );
   });
 
-  it("searches by username/displayName and sorts by donation count", async () => {
+  it("searches by username/displayName and sorts by donation count with an id tiebreaker", async () => {
     mockedPrisma.creator.findMany.mockResolvedValue([]);
     mockedPrisma.creator.count.mockResolvedValue(0);
 
@@ -66,7 +69,7 @@ describe("GET /api/creators", () => {
     expect(res.status).toBe(200);
     expect(mockedPrisma.creator.findMany).toHaveBeenCalledWith(
       expect.objectContaining({
-        orderBy: { donations: { _count: "desc" } },
+        orderBy: [{ donations: { _count: "desc" } }, { id: "asc" }],
         where: {
           walletAddress: { not: null },
           OR: [
@@ -76,6 +79,30 @@ describe("GET /api/creators", () => {
         },
       })
     );
+  });
+
+  it("paginates creators with tied verified donation counts deterministically without duplicates or drops (#393)", async () => {
+    const tiedCreators = [
+      { id: 4, username: "diana", _count: { donations: 0 } },
+      { id: 2, username: "bob", _count: { donations: 0 } },
+      { id: 1, username: "alice", _count: { donations: 2 } },
+      { id: 3, username: "charlie", _count: { donations: 0 } },
+    ];
+    mockedPrisma.creator.findMany.mockResolvedValue(tiedCreators);
+    mockedPrisma.creator.count.mockResolvedValue(tiedCreators.length);
+
+    const page1 = await request(app).get("/api/creators?sort=most-supported&page=1&limit=2");
+    const page2 = await request(app).get("/api/creators?sort=most-supported&page=2&limit=2");
+
+    expect(page1.status).toBe(200);
+    expect(page2.status).toBe(200);
+
+    const page1Ids = page1.body.items.map((c: { id: number }) => c.id);
+    const page2Ids = page2.body.items.map((c: { id: number }) => c.id);
+
+    expect(page1Ids).toEqual([1, 2]);
+    expect(page2Ids).toEqual([3, 4]);
+    expect(new Set([...page1Ids, ...page2Ids]).size).toBe(4);
   });
 });
 

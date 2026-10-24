@@ -166,4 +166,84 @@ describe("POST /api/withdrawals", () => {
     expect(res.body).toEqual(existing);
     expect(mockedPrisma.withdrawal.create).not.toHaveBeenCalled();
   });
+
+  it("rejects an unknown/free-form withdrawal status with 400 VALIDATION_ERROR (#393)", async () => {
+    const res = await request(app)
+      .post("/api/withdrawals")
+      .set("Authorization", `Bearer ${token}`)
+      .send({
+        creatorUsername: "bob",
+        amountIn: 10,
+        anchorTxId: "tx-invalid-status",
+        status: "arbitrary_free_form_status",
+      });
+
+    expect(res.status).toBe(400);
+    expect(res.body.code).toBe("VALIDATION_ERROR");
+    expect(mockedPrisma.withdrawal.create).not.toHaveBeenCalled();
+  });
+
+  it("downgrades a self-reported completed withdrawal without stellarTxId or anchor confirmation to pending_anchor (#393)", async () => {
+    mockedPrisma.creator.findUnique.mockResolvedValue({ id: 7, userId: 1, username: "bob" });
+    mockedPrisma.withdrawal.findUnique.mockResolvedValue(null);
+    mockedPrisma.withdrawal.create.mockImplementation(async ({ data }) => ({ id: 2, ...data }));
+
+    const res = await request(app)
+      .post("/api/withdrawals")
+      .set("Authorization", `Bearer ${token}`)
+      .send({
+        creatorUsername: "bob",
+        amountIn: 500,
+        anchorTxId: "unverified-anchor-tx",
+      });
+
+    expect(res.status).toBe(201);
+    expect(res.body.status).toBe("pending_anchor");
+    expect(mockedPrisma.withdrawal.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        creatorId: 7,
+        amountIn: 500,
+        anchorTxId: "unverified-anchor-tx",
+        status: "pending_anchor",
+      }),
+    });
+  });
+
+  it("downgrades status to pending_anchor when Horizon does not confirm the stellarTxId (#393)", async () => {
+    const originalFetch = global.fetch;
+    global.fetch = jest.fn().mockResolvedValue({
+      ok: false,
+      status: 404,
+      json: async () => ({}),
+    }) as unknown as typeof fetch;
+
+    try {
+      mockedPrisma.creator.findUnique.mockResolvedValue({ id: 7, userId: 1, username: "bob" });
+      mockedPrisma.withdrawal.findUnique.mockResolvedValue(null);
+      mockedPrisma.withdrawal.create.mockImplementation(async ({ data }) => ({ id: 3, ...data }));
+
+      const res = await request(app)
+        .post("/api/withdrawals")
+        .set("Authorization", `Bearer ${token}`)
+        .send({
+          creatorUsername: "bob",
+          amountIn: 25,
+          anchorTxId: "tx-unconfirmed",
+          stellarTxId: "missing-on-horizon",
+          status: "completed",
+        });
+
+      expect(res.status).toBe(201);
+      expect(res.body.status).toBe("pending_anchor");
+      expect(mockedPrisma.withdrawal.create).toHaveBeenCalledWith({
+        data: expect.objectContaining({
+          anchorTxId: "tx-unconfirmed",
+          stellarTxId: "missing-on-horizon",
+          status: "pending_anchor",
+        }),
+      });
+    } finally {
+      global.fetch = originalFetch;
+    }
+  });
 });

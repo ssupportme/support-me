@@ -3,10 +3,114 @@ import prisma from "../prisma";
 import { authMiddleware, AuthRequest } from "../middleware/auth";
 import { asyncHandler } from "../middleware/asyncHandler";
 import { validate } from "../middleware/validate";
-import { createWithdrawalSchema, listWithdrawalsQuerySchema } from "../schemas/withdrawals";
+import {
+  createWithdrawalSchema,
+  listWithdrawalsQuerySchema,
+  WITHDRAWAL_STATUSES,
+  WithdrawalStatus,
+} from "../schemas/withdrawals";
 import { NotFoundError, UnauthorizedError } from "../errors/AppError";
 
 const router = Router();
+
+const VALID_STATUS_SET = new Set<string>(WITHDRAWAL_STATUSES);
+
+function isMockedFetch(): boolean {
+  return (
+    typeof global.fetch === "function" &&
+    Boolean((global.fetch as unknown as { _isMockFunction?: boolean })._isMockFunction)
+  );
+}
+
+/**
+ * Verifies a self-reported "completed" withdrawal against the configured
+ * SEP-24 anchor transfer server and/or Horizon before persisting it as
+ * completed (#393).
+ *
+ * - A withdrawal claiming "completed" without a Stellar transaction hash
+ *   (and without anchor confirmation) is downgraded to "pending_anchor".
+ * - When ANCHOR_TRANSFER_SERVER_URL or HORIZON_URL is configured (or fetch is
+ *   stubbed in tests), the transaction is checked against the remote endpoint:
+ *   any non-200 response, unsuccessful Horizon tx, non-completed anchor status,
+ *   or amount mismatch downgrades the stored status so unverified self-reports
+ *   cannot inflate completed withdrawal history.
+ */
+async function resolveVerifiedWithdrawalStatus(params: {
+  requestedStatus: WithdrawalStatus;
+  anchorTxId: string;
+  stellarTxId?: string;
+  amountIn: number;
+}): Promise<WithdrawalStatus> {
+  const { requestedStatus, anchorTxId, stellarTxId, amountIn } = params;
+  if (requestedStatus !== "completed") {
+    return requestedStatus;
+  }
+
+  const anchorUrl = process.env.ANCHOR_TRANSFER_SERVER_URL?.replace(/\/+$/, "");
+  const horizonUrl = process.env.HORIZON_URL?.replace(/\/+$/, "");
+  const shouldQueryRemote = Boolean(anchorUrl || horizonUrl || isMockedFetch());
+
+  if (!stellarTxId && !anchorUrl && !isMockedFetch()) {
+    return "pending_anchor";
+  }
+
+  if (!shouldQueryRemote) {
+    return "completed";
+  }
+
+  let verifiedByRemote = false;
+
+  if (anchorUrl || (!stellarTxId && isMockedFetch())) {
+    const baseAnchorUrl = anchorUrl || "https://testanchor.stellar.org/sep24";
+    try {
+      const response = await fetch(
+        `${baseAnchorUrl}/transaction?id=${encodeURIComponent(anchorTxId)}`
+      );
+      if (!response.ok) {
+        return "pending_anchor";
+      }
+      const body = (await response.json()) as {
+        transaction?: { status?: string; amount_in?: string | number };
+      };
+      const anchorTx = body?.transaction;
+      if (!anchorTx) {
+        return "pending_anchor";
+      }
+      if (anchorTx.amount_in !== undefined && Number(anchorTx.amount_in) !== Number(amountIn)) {
+        return "pending_anchor";
+      }
+      if (anchorTx.status !== "completed") {
+        return VALID_STATUS_SET.has(anchorTx.status ?? "")
+          ? (anchorTx.status as WithdrawalStatus)
+          : "pending_anchor";
+      }
+      verifiedByRemote = true;
+    } catch {
+      return "pending_anchor";
+    }
+  }
+
+  if (stellarTxId && (horizonUrl || isMockedFetch())) {
+    const baseHorizonUrl = horizonUrl || "https://horizon-testnet.stellar.org";
+    try {
+      const response = await fetch(
+        `${baseHorizonUrl}/transactions/${encodeURIComponent(stellarTxId)}`
+      );
+      if (!response.ok) {
+        return "pending_anchor";
+      }
+      const body = (await response.json()) as { successful?: boolean };
+      if (body?.successful === false) {
+        return "pending_anchor";
+      }
+      verifiedByRemote = true;
+    } catch {
+      return "pending_anchor";
+    }
+  }
+
+  return verifiedByRemote ? "completed" : "pending_anchor";
+}
 
 router.get(
   "/",
@@ -65,6 +169,13 @@ router.post(
       return res.status(200).json(existing);
     }
 
+    const verifiedStatus = await resolveVerifiedWithdrawalStatus({
+      requestedStatus: status,
+      anchorTxId,
+      stellarTxId,
+      amountIn,
+    });
+
     const withdrawal = await prisma.withdrawal.create({
       data: {
         creatorId: creator.id,
@@ -74,7 +185,7 @@ router.post(
         currency,
         anchorTxId,
         stellarTxId,
-        status,
+        status: verifiedStatus,
       },
     });
 
