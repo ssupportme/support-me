@@ -21,6 +21,16 @@ jobs:
       - name: Compare shared contract IDs across frontend/.env.example and backend/.env.example
         run: node scripts/check-env-example-drift.js
 
+  repo-hygiene:
+    name: Check for leftover scratch files
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Reject one-off merge-conflict scratch files at the repository root
+        run: node scripts/check-root-scratch-files.js
+      - name: Self-test the guard
+        run: node scripts/check-root-scratch-files.js --self-test
+
   contracts:
     name: Contracts (Rust/Soroban)
     runs-on: ubuntu-latest
