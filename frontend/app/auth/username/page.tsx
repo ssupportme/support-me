@@ -59,7 +59,10 @@ export default function CreateUsernamePage() {
 
       if (!res.ok) {
         const data = await res.json();
-        throw new Error(data.error || 'Failed to create username');
+        // Schema failures put the actionable message in details[0]; the
+        // top-level error is only "Validation failed" (#387).
+        const detail = Array.isArray(data.details) && data.details[0]?.message;
+        throw new Error(detail || data.error || 'Failed to create username');
       }
 
       router.push('/app');

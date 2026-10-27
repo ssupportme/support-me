@@ -147,7 +147,12 @@ describe("GET /api/creators/:username", () => {
 // registering the challenge the real /api/auth/challenge endpoint would issue.
 function proveWallet(keypair: Keypair): string {
   const message = `Sign in to SupportMe\n\nAddress: ${keypair.publicKey()}\nNonce: test-nonce\nIssued At: now`;
-  challenges.set(keypair.publicKey(), { message, expiresAt: Date.now() + 60_000 });
+  challenges.set(keypair.publicKey(), {
+    id: `test-challenge-${keypair.publicKey()}`,
+    walletAddress: keypair.publicKey(),
+    message,
+    expiresAt: Date.now() + 60_000,
+  });
   const { createHash } = jest.requireActual("crypto") as typeof import("crypto");
   const hash = createHash("sha256")
     .update(Buffer.concat([Buffer.from("Stellar Signed Message:\n"), Buffer.from(message)]))
@@ -182,7 +187,7 @@ describe("POST /api/creators/:username/create", () => {
   });
 
   it("returns 409 when the username is already taken", async () => {
-    mockedPrisma.creator.findUnique.mockResolvedValueOnce({ id: 2, username: "bob" });
+    mockedPrisma.creator.findFirst.mockResolvedValueOnce({ id: 2, username: "bob" });
 
     const res = await request(app)
       .post("/api/creators/bob/create")
@@ -193,10 +198,35 @@ describe("POST /api/creators/:username/create", () => {
     expect(res.body.code).toBe("CONFLICT");
   });
 
+  it("returns 409 when the username differs only by case", async () => {
+    mockedPrisma.creator.findFirst.mockResolvedValueOnce({ id: 2, username: "Alice" });
+
+    const res = await request(app)
+      .post("/api/creators/alice/create")
+      .set("Authorization", `Bearer ${token}`)
+      .send({});
+
+    expect(res.status).toBe(409);
+    expect(res.body.code).toBe("CONFLICT");
+  });
+
+  it.each(["admin", "settings"])(
+    "rejects the reserved username %s before hitting the database",
+    async (username) => {
+      const res = await request(app)
+        .post(`/api/creators/${username}/create`)
+        .set("Authorization", `Bearer ${token}`)
+        .send({});
+
+      expect(res.status).toBe(400);
+      expect(res.body.code).toBe("VALIDATION_ERROR");
+      expect(res.body.details?.[0]?.message).toMatch(/reserved/i);
+    }
+  );
+
   it("returns 409 when the authenticated user already has a profile", async () => {
-    mockedPrisma.creator.findUnique
-      .mockResolvedValueOnce(null) // username lookup
-      .mockResolvedValueOnce({ id: 3, username: "existing-profile" }); // userId lookup
+    mockedPrisma.creator.findFirst.mockResolvedValueOnce(null); // username lookup
+    mockedPrisma.creator.findUnique.mockResolvedValueOnce({ id: 3, username: "existing-profile" });
 
     const res = await request(app)
       .post("/api/creators/bob/create")
@@ -719,7 +749,12 @@ describe("Creator wallet binding (#276)", () => {
       const victim = Keypair.random();
       const attacker = Keypair.random();
       const message = `Sign in to SupportMe\n\nAddress: ${victim.publicKey()}\nNonce: n\nIssued At: now`;
-      challenges.set(victim.publicKey(), { message, expiresAt: Date.now() + 60_000 });
+      challenges.set(victim.publicKey(), {
+        id: `test-challenge-${victim.publicKey()}`,
+        walletAddress: victim.publicKey(),
+        message,
+        expiresAt: Date.now() + 60_000,
+      });
       const { createHash } = jest.requireActual("crypto") as typeof import("crypto");
       const hash = createHash("sha256")
         .update(Buffer.concat([Buffer.from("Stellar Signed Message:\n"), Buffer.from(message)]))
@@ -780,7 +815,9 @@ describe("Creator wallet binding (#276)", () => {
     });
 
     it("rejects a wallet already linked to another creator profile", async () => {
-      mockedPrisma.creator.findFirst.mockResolvedValue({ id: 99 });
+      mockedPrisma.creator.findFirst
+        .mockResolvedValueOnce(null) // username lookup
+        .mockResolvedValueOnce({ id: 99 }); // wallet lookup
 
       const res = await request(app)
         .post("/api/creators/bob/create")
@@ -825,8 +862,11 @@ describe("Creator wallet binding (#276)", () => {
       expect(mockedPrisma.creator.create).toHaveBeenCalledWith({
         data: expect.objectContaining({ walletAddress: null }),
       });
-      // No wallet to bind, so no uniqueness lookup either.
-      expect(mockedPrisma.creator.findFirst).not.toHaveBeenCalled();
+      // No wallet to bind, so the only lookup is the username check.
+      expect(mockedPrisma.creator.findFirst).toHaveBeenCalledTimes(1);
+      expect(mockedPrisma.creator.findFirst).toHaveBeenCalledWith({
+        where: { username: { equals: "bob", mode: "insensitive" } },
+      });
     });
   });
 
