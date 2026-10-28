@@ -39,6 +39,21 @@ const getPollIntervalMs = (): number => {
 };
 
 /**
+ * Bounded lease duration used when atomically claiming a due subscription
+ * before submitting `charge_subscription` (#394). If an executor instance
+ * crashes mid-charge, its claim expires after this TTL so a subsequent tick
+ * can recover and charge the subscription.
+ */
+export const SUBSCRIPTION_CLAIM_TTL_MS = 5 * 60 * 1000;
+
+const getClaimTtlMs = (): number => {
+  const configured = Number(process.env.SUBSCRIPTION_CLAIM_TTL_MS);
+  return Number.isFinite(configured) && configured > 0
+    ? configured
+    : SUBSCRIPTION_CLAIM_TTL_MS;
+};
+
+/**
  * Errors that describe the executor's own account rather than the subscription
  * being charged (#279): an unfunded executor account or a fee it cannot cover.
  * Counting these against the subscriber would deactivate subscriptions and
@@ -326,8 +341,9 @@ export class SubscriptionExecutor {
     let ok = false;
     let runError: string | undefined;
     try {
+      const now = new Date();
       const due = await prisma.subscription.findMany({
-        where: { active: true, nextChargeAt: { lte: new Date() } },
+        where: { active: true, nextChargeAt: { lte: now } },
       });
 
       log("info", "SubscriptionExecutor tick started", { dueCount: due.length });
@@ -338,6 +354,10 @@ export class SubscriptionExecutor {
       
       const processSubscription = async (subscription: Subscription) => {
         try {
+          const claimed = await this.claimSubscription(subscription, now);
+          if (!claimed) {
+            return;
+          }
           await this.charge(subscription);
         } catch (error) {
           const errorMessage = (error as Error).message;
@@ -369,6 +389,34 @@ export class SubscriptionExecutor {
       this.running = false;
       executorHealth.runFinished(ok, runError);
     }
+  }
+
+  /**
+   * Atomically claims a due subscription in the database with a bounded lease
+   * (`nextChargeAt = now + SUBSCRIPTION_CLAIM_TTL_MS`) so concurrent
+   * `SubscriptionExecutor` instances cannot double-submit `charge_subscription`
+   * for the same billing interval (#394). If an instance crashes mid-charge,
+   * the lease expires once `nextChargeAt <= now` on a subsequent tick.
+   */
+  private async claimSubscription(subscription: Subscription, now: Date): Promise<boolean> {
+    if (typeof prisma.subscription.updateMany !== "function") {
+      return true;
+    }
+    const claimExpiresAt = new Date(now.getTime() + getClaimTtlMs());
+    const result = await prisma.subscription.updateMany({
+      where: {
+        id: subscription.id,
+        active: true,
+        nextChargeAt: { lte: now },
+      },
+      data: {
+        nextChargeAt: claimExpiresAt,
+      },
+    });
+    if (!result || typeof result.count !== "number") {
+      return true;
+    }
+    return result.count === 1;
   }
 
   private async charge(subscription: Subscription): Promise<void> {
