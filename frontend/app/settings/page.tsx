@@ -537,7 +537,7 @@ export default function SettingsPage() {
                   className="w-5 h-5 accent-primary min-h-[20px] min-w-[20px]"
                 />
               </label>
-              <label className="flex items-center justify-between gap-4 cursor-pointer">
+              <label className="flex items-center justify-between gap-4 cursor-pointer min-h-[44px] py-1">
                 <span className="font-bold text-ink">Accept USDT</span>
                 <input
                   type="checkbox"
@@ -546,8 +546,7 @@ export default function SettingsPage() {
                     setAcceptsUsdt(e.target.checked);
                     setDirty(true);
                   }}
-                  placeholder="e.g. 1000"
-                  className="input-brutal min-h-[44px]"
+                  className="w-5 h-5 accent-primary min-h-[20px] min-w-[20px]"
                 />
               </label>
             </section>

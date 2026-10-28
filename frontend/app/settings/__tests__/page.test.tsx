@@ -128,6 +128,12 @@ describe('SettingsPage', () => {
     await waitFor(() => expect(screen.getByText('Accept USDT')).toBeInTheDocument());
     expect(screen.getByText('Accept XLM')).toBeInTheDocument();
     expect(screen.getByText('Accept USDC')).toBeInTheDocument();
+
+    const usdtToggle = screen.getByLabelText('Accept USDT');
+    expect(usdtToggle).toHaveAttribute('type', 'checkbox');
+    expect(usdtToggle).toHaveClass('w-5', 'h-5', 'accent-primary', 'min-h-[20px]', 'min-w-[20px]');
+    expect(usdtToggle.closest('label')).toHaveClass('min-h-[44px]', 'py-1');
+    expect(usdtToggle).not.toHaveAttribute('placeholder');
   });
 
   it('copies the connected wallet address and confirms success', async () => {
