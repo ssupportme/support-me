@@ -1,8 +1,9 @@
 'use client';
 
-import { createContext, useContext, useState, useEffect, ReactNode } from 'react';
+import { createContext, useContext, useState, useEffect, useCallback, ReactNode } from 'react';
 import { connectWallet, disconnectWallet, signMessage } from '@/lib/wallet';
 import { API_URL } from '@/lib/api';
+import { isTokenExpired } from '@/lib/authFetch';
 
 interface User {
   id: number;
@@ -199,7 +200,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return persistSession(data);
   };
 
-  const logout = () => {
+  // Memoized so consumers built on it (useAuthFetch) keep a stable identity
+  // across renders — a fresh closure per render would re-run their effects.
+  const logout = useCallback(() => {
     setUser(null);
     setToken(null);
     localStorage.removeItem('authToken');
@@ -214,7 +217,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       }
     } catch {}
     disconnectWallet().catch(() => {});
-  };
+  }, []);
 
   return (
     <AuthContext.Provider

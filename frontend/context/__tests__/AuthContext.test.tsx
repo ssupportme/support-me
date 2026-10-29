@@ -17,6 +17,13 @@ function jsonResponse(body: unknown, ok = true) {
   return { ok, json: async () => body } as Response;
 }
 
+/** Builds a structurally-valid JWT with the given claims (#246). */
+function makeJwt(claims: Record<string, unknown>) {
+  const encode = (obj: unknown) =>
+    btoa(JSON.stringify(obj)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+  return `${encode({ alg: 'HS256', typ: 'JWT' })}.${encode(claims)}.signature`;
+}
+
 describe('AuthContext', () => {
   beforeEach(() => {
     localStorage.clear();

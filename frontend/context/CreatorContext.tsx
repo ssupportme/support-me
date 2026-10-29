@@ -3,6 +3,7 @@
 import { createContext, useContext, useState, useEffect, useCallback, ReactNode } from 'react';
 import { useAuth } from '@/context/AuthContext';
 import { API_URL } from '@/lib/api';
+import { useAuthFetch } from '@/lib/useAuthFetch';
 import type { ProfileTheme } from '@/lib/theme';
 
 interface Creator {
@@ -32,6 +33,7 @@ const CreatorContext = createContext<CreatorContextType | undefined>(undefined);
 
 export function CreatorProvider({ children }: { children: ReactNode }) {
   const { user, token } = useAuth();
+  const authFetch = useAuthFetch();
   const [creator, setCreator] = useState<Creator | null>(null);
   const [loading, setLoading] = useState(true);
   const [fetchKey, setFetchKey] = useState(0);
@@ -64,7 +66,7 @@ export function CreatorProvider({ children }: { children: ReactNode }) {
     };
     fetchCreator();
     return () => { active = false; };
-  }, [user, token, fetchKey]);
+  }, [user, token, fetchKey, authFetch]);
 
   const invalidate = useCallback(() => setFetchKey((k) => k + 1), []);
 
