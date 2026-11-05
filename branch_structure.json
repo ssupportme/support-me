@@ -1,0 +1,18 @@
+{
+  "default_branch": "main",
+  "branches": [
+    "fix/issue-400-frontend-add-unit-tests-for-lib-contract-js",
+    "main",
+    "origin"
+  ],
+  "parent": {
+    "fix/issue-400-frontend-add-unit-tests-for-lib-contract-js": "main",
+    "main": null,
+    "origin": "main"
+  },
+  "order": [
+    "main",
+    "fix/issue-400-frontend-add-unit-tests-for-lib-contract-js",
+    "origin"
+  ]
+}

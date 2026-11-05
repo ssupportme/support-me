@@ -104,4 +104,11 @@ describe('lib/assets', () => {
     const { sacContractId } = await loadAssets();
     expect(() => sacContractId('USDT')).toThrow(/USDT is not configured for donations/);
   });
+
+  it('USDT balanceMatcher ignores balances with no issuer', async () => {
+    process.env.NEXT_PUBLIC_USDT_ISSUER = 'GUSDTISSUERXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX';
+    const { ASSETS } = await loadAssets();
+
+    expect(ASSETS.USDT!.balanceMatcher(creditBalance('USDT', undefined))).toBe(false);
+  });
 });
