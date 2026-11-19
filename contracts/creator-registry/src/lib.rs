@@ -141,6 +141,8 @@ pub enum RegistryError {
     InvalidUsernameChars = 20,
     UsernameTaken = 21,
     UnsupportedAction = 22,
+    ProposalCancelled = 23,
+    ProposalExpired = 24,
 }
 
 #[contract]
@@ -203,14 +205,9 @@ impl CreatorRegistryContract {
         timelock_delay: u64,
         donation_contract: Address,
     ) {
+        validate_admin_set(&admins, threshold);
         if env.storage().instance().has(&ADMIN_KEY) || env.storage().instance().has(&ADMINS_KEY) {
             soroban_sdk::panic_with_error!(&env, RegistryError::AlreadyInitialized);
-        }
-        if admins.is_empty() {
-            soroban_sdk::panic_with_error!(&env, RegistryError::EmptyAdminList);
-        }
-        if threshold == 0 || threshold > admins.len() {
-            soroban_sdk::panic_with_error!(&env, RegistryError::InvalidThreshold);
         }
 
         for i in 0..admins.len() {
@@ -353,7 +350,11 @@ impl CreatorRegistryContract {
             soroban_sdk::panic_with_error!(&env, RegistryError::ProposalAlreadyExecuted);
         }
         if proposal.cancelled {
-            soroban_sdk::panic_with_error!(&env, RegistryError::ProposalAlreadyExecuted);
+            soroban_sdk::panic_with_error!(&env, RegistryError::ProposalCancelled);
+        }
+        let now = env.ledger().timestamp();
+        if now > proposal.expires_at {
+            soroban_sdk::panic_with_error!(&env, RegistryError::ProposalExpired);
         }
 
         let has_approved: bool = env
@@ -459,7 +460,7 @@ impl CreatorRegistryContract {
             soroban_sdk::panic_with_error!(&env, RegistryError::ProposalAlreadyExecuted);
         }
         if proposal.cancelled {
-            soroban_sdk::panic_with_error!(&env, RegistryError::ProposalAlreadyExecuted);
+            soroban_sdk::panic_with_error!(&env, RegistryError::ProposalCancelled);
         }
 
         let threshold: u32 = match env.storage().instance().get(&THRESHOLD_KEY) {
@@ -472,7 +473,7 @@ impl CreatorRegistryContract {
 
         let now = env.ledger().timestamp();
         if now > proposal.expires_at {
-            soroban_sdk::panic_with_error!(&env, RegistryError::ProposalAlreadyExecuted);
+            soroban_sdk::panic_with_error!(&env, RegistryError::ProposalExpired);
         }
         if now < proposal.eta {
             soroban_sdk::panic_with_error!(&env, RegistryError::TimelockNotElapsed);
@@ -507,6 +508,13 @@ impl CreatorRegistryContract {
                     soroban_sdk::panic_with_error!(&env, RegistryError::ThresholdExceedsAdmins);
                 }
                 env.storage().instance().set(&ADMINS_KEY, &new_admins);
+
+                let current_primary: Address = env.storage().instance().get(&ADMIN_KEY).unwrap();
+                if current_primary == old_admin {
+                    env.storage()
+                        .instance()
+                        .set(&ADMIN_KEY, &new_admins.get(0).unwrap());
+                }
             }
             AdminAction::SetThreshold(new_threshold) => {
                 let admins: Vec<Address> = env.storage().instance().get(&ADMINS_KEY).unwrap();
@@ -1282,7 +1290,10 @@ mod tests {
         env.ledger()
             .with_mut(|li| li.timestamp = ADMIN_PROPOSAL_TTL_SECONDS + 1);
 
-        assert!(client.try_execute_admin_action(&admin, &prop_id).is_err());
+        assert_eq!(
+            client.try_execute_admin_action(&admin, &prop_id),
+            Err(Ok(RegistryError::ProposalExpired.into()))
+        );
         assert!(!client.get_proposal(&prop_id).unwrap().executed);
     }
 
@@ -1304,7 +1315,10 @@ mod tests {
 
         // Even after the timelock passes, a cancelled proposal must never execute.
         env.ledger().with_mut(|li| li.timestamp = 10);
-        assert!(client.try_execute_admin_action(&admin, &prop_id).is_err());
+        assert_eq!(
+            client.try_execute_admin_action(&admin, &prop_id),
+            Err(Ok(RegistryError::ProposalCancelled.into()))
+        );
         let prop_after = client.get_proposal(&prop_id).unwrap();
         assert!(prop_after.cancelled);
         assert!(!prop_after.executed);
@@ -1394,5 +1408,142 @@ mod tests {
         client.approve_admin_action(&admin2, &prop0);
         client.execute_admin_action(&admin1, &prop0);
         assert!(client.get_proposal(&prop0).unwrap().executed);
+    }
+
+    #[test]
+    fn test_approve_rejects_cancelled_and_expired_proposals() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let admin1 = Address::generate(&env);
+        let admin2 = Address::generate(&env);
+        let contract_id = env.register(
+            CreatorRegistryContract,
+            (
+                vec![&env, admin1.clone(), admin2.clone()],
+                2u32,
+                0u64,
+                Address::generate(&env),
+            ),
+        );
+        let client = CreatorRegistryContractClient::new(&env, &contract_id);
+
+        let target = Address::generate(&env);
+        let prop_id =
+            client.propose_admin_action(&admin1, &AdminAction::SetDonationContract(target));
+
+        client.cancel_admin_action(&admin1, &prop_id);
+        assert_eq!(
+            client.try_approve_admin_action(&admin2, &prop_id),
+            Err(Ok(RegistryError::ProposalCancelled.into()))
+        );
+
+        let target2 = Address::generate(&env);
+        let prop2_id =
+            client.propose_admin_action(&admin1, &AdminAction::SetDonationContract(target2));
+        env.ledger()
+            .with_mut(|li| li.timestamp = ADMIN_PROPOSAL_TTL_SECONDS + 1);
+        assert_eq!(
+            client.try_approve_admin_action(&admin2, &prop2_id),
+            Err(Ok(RegistryError::ProposalExpired.into()))
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "duplicate admin in admin list")]
+    fn test_initialize_multisig_rejects_duplicate_admins() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let admin = Address::generate(&env);
+        let admins = vec![&env, admin.clone(), admin.clone()];
+        CreatorRegistryContract::initialize_multisig(
+            env.clone(),
+            admins,
+            1u32,
+            0u64,
+            Address::generate(&env),
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "duplicate admin in admin list")]
+    fn test_constructor_rejects_duplicate_admins() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let admin = Address::generate(&env);
+        let admins = vec![&env, admin.clone(), admin.clone()];
+        env.register(
+            CreatorRegistryContract,
+            (admins, 1u32, 0u64, Address::generate(&env)),
+        );
+    }
+
+    #[test]
+    fn test_remove_admin_revokes_primary_admin_privileges() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let admin1 = Address::generate(&env);
+        let admin2 = Address::generate(&env);
+        let admin3 = Address::generate(&env);
+
+        let contract_id = env.register(
+            CreatorRegistryContract,
+            (
+                vec![&env, admin1.clone(), admin2.clone(), admin3.clone()],
+                2u32,
+                0u64,
+                Address::generate(&env),
+            ),
+        );
+        let client = CreatorRegistryContractClient::new(&env, &contract_id);
+
+        let prop_id =
+            client.propose_admin_action(&admin2, &AdminAction::RemoveAdmin(admin1.clone()));
+        client.approve_admin_action(&admin3, &prop_id);
+        client.execute_admin_action(&admin2, &prop_id);
+
+        assert!(!client.is_admin(&admin1));
+    }
+
+    #[test]
+    fn test_remove_primary_admin_reassigns_admin_key_on_single_admin_deployment() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let admin1 = Address::generate(&env);
+        let admin2 = Address::generate(&env);
+
+        let contract_id = env.register(
+            CreatorRegistryContract,
+            (
+                vec![&env, admin1.clone(), admin2.clone()],
+                2u32,
+                0u64,
+                Address::generate(&env),
+            ),
+        );
+        let client = CreatorRegistryContractClient::new(&env, &contract_id);
+
+        // Lower threshold to 1 first
+        let threshold_prop = client.propose_admin_action(&admin1, &AdminAction::SetThreshold(1));
+        client.approve_admin_action(&admin2, &threshold_prop);
+        client.execute_admin_action(&admin1, &threshold_prop);
+
+        // Remove admin1 (primary admin)
+        let remove_prop =
+            client.propose_admin_action(&admin2, &AdminAction::RemoveAdmin(admin1.clone()));
+        client.execute_admin_action(&admin2, &remove_prop);
+
+        assert!(!client.is_admin(&admin1));
+        assert!(client.is_admin(&admin2));
+
+        // admin2 is now sole admin and threshold is 1; set_donation_contract direct call works for admin2
+        let new_donation = Address::generate(&env);
+        client.set_donation_contract(&new_donation);
+        let creator = Address::generate(&env);
+        client.register_creator(&creator, &soroban_sdk::String::from_str(&env, "alice"));
+        client.record_donation(&new_donation, &creator, &50);
+        let profile = client.get_creator(&creator).unwrap();
+        assert_eq!(profile.total_donations, 50);
     }
 }
