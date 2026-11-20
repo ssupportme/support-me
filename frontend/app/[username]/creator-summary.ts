@@ -6,6 +6,9 @@ export interface CreatorSummary {
   bio: string | null;
   avatarUrl: string | null;
   donationGoal: number | null;
+  // ISO timestamp of the last profile change; used for JSON-LD dateModified
+  // so crawlers see a stable value instead of the render time (#459).
+  updatedAt: string;
 }
 
 // Server-side only, purely for building link-preview metadata and images —

@@ -275,6 +275,13 @@ model Subscription {
   // executor (which retries every tick) sends one notice per failure streak
   // instead of one per retry. Cleared on the next successful charge.
   failureNotifiedAt DateTime?
+  // Distributed-executor claim (#394): set while one backend instance is
+  // charging this subscription so a concurrent tick() on another instance
+  // skips it. Released when the charge finishes; an unreleased claim older
+  // than SUBSCRIPTION_EXECUTOR_CLAIM_TTL_MS is treated as abandoned by a
+  // crashed instance and can be taken over by a later tick.
+  claimedAt         DateTime?
+  claimedBy         String?
   createdAt         DateTime  @default(now())
   updatedAt         DateTime  @updatedAt
 

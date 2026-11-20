@@ -21,6 +21,8 @@ import { applyDonationToGoals } from "./goalService";
 import { notifyGoalsReached } from "./donationNotifications";
 import { log } from "../lib/logger";
 import * as Sentry from "@sentry/node";
+import { hostname } from "node:os";
+import { randomUUID } from "node:crypto";
 
 import { config } from "../config";
 import { toAmount } from "../lib/money";
@@ -37,6 +39,26 @@ const getPollIntervalMs = (): number => {
   const configured = Number(process.env.SUBSCRIPTION_EXECUTOR_POLL_INTERVAL_MS);
   return Number.isFinite(configured) && configured > 0 ? configured : 60_000;
 };
+
+/**
+ * How long a claim may be held before another instance may take it over
+ * (#394). Must comfortably exceed the longest possible charge attempt
+ * (`confirm()` alone waits up to 30s), so a slow-but-alive instance is not
+ * pre-empted mid-charge, while still letting a later tick recover a
+ * subscription from a crashed one.
+ */
+const getClaimTtlMs = (): number => {
+  const configured = Number(process.env.SUBSCRIPTION_EXECUTOR_CLAIM_TTL_MS);
+  return Number.isFinite(configured) && configured > 0 ? configured : 5 * 60_000;
+};
+
+/**
+ * Identifies this process's claims (#394). Only used for diagnostics (which
+ * instance holds a subscription) and to make a release conditional on still
+ * owning the claim, so an instance whose claim expired and was taken over
+ * cannot clear the new owner's claim.
+ */
+const EXECUTOR_INSTANCE_ID = `${hostname()}:${process.pid}:${randomUUID().slice(0, 8)}`;
 
 /**
  * Errors that describe the executor's own account rather than the subscription
@@ -323,7 +345,15 @@ export class SubscriptionExecutor {
     }
   }
 
-  /** Runs one pass over every due subscription. Public so tests can drive it. */
+  /**
+   * Runs one pass over every due subscription. Public so tests can drive it.
+   *
+   * Safe to run on several backend instances at once (#394): each due
+   * subscription is claimed atomically before it is charged, so overlapping
+   * ticks — a Railway scale-up, a rolling deploy, or a developer's local
+   * backend sharing the database — submit exactly one charge per due
+   * subscription. `this.running` only prevents overlap within one process.
+   */
   async tick(): Promise<void> {
     if (this.running) return;
     // #278: a detected testnet reset invalidates every cached on-chain ID, so
@@ -349,6 +379,27 @@ export class SubscriptionExecutor {
       const CONCURRENCY_LIMIT = 5;
       
       const processSubscription = async (subscription: Subscription) => {
+        // #394: another instance may have charged or claimed this
+        // subscription between our findMany and this claim attempt. Claiming
+        // is a single conditional UPDATE, so exactly one instance wins.
+        let claimed = false;
+        try {
+          claimed = await this.claim(subscription);
+        } catch (error) {
+          log("error", "SubscriptionExecutor claim failed", {
+            subscriptionId: subscription.id,
+            error: (error as Error).message,
+          });
+          return;
+        }
+
+        if (!claimed) {
+          log("info", "SubscriptionExecutor skipped claimed subscription", {
+            subscriptionId: subscription.id,
+          });
+          return;
+        }
+
         try {
           await this.charge(subscription);
         } catch (error) {
@@ -361,6 +412,11 @@ export class SubscriptionExecutor {
             token: subscription.token,
             error: errorMessage,
           });
+        } finally {
+          // Always release, on success and failure alike, so the next tick
+          // (here or on another instance) can retry or see the new
+          // nextChargeAt. A crash instead leaves the claim to expire.
+          await this.releaseClaim(subscription.id);
         }
       };
 
@@ -380,6 +436,55 @@ export class SubscriptionExecutor {
     } finally {
       this.running = false;
       executorHealth.runFinished(ok, runError);
+    }
+  }
+
+  /**
+   * Atomically claims one due subscription for this instance (#394).
+   *
+   * The conditional `updateMany` is the cross-instance lock: it only matches
+   * while the subscription is still active and due and is either unclaimed or
+   * holds a claim older than the TTL, and it reports how many rows it
+   * changed. Outside a transaction, Postgres serialises the competing UPDATEs
+   * on the row, so exactly one instance gets `count === 1` and the others get
+   * `count === 0`. A claim abandoned by a crashed instance expires after
+   * `SUBSCRIPTION_EXECUTOR_CLAIM_TTL_MS`, after which a later tick takes it
+   * over.
+   */
+  private async claim(subscription: Subscription): Promise<boolean> {
+    const now = new Date();
+    const expiredBefore = new Date(now.getTime() - getClaimTtlMs());
+
+    const { count } = await prisma.subscription.updateMany({
+      where: {
+        id: subscription.id,
+        active: true,
+        nextChargeAt: { lte: now },
+        OR: [{ claimedAt: null }, { claimedAt: { lt: expiredBefore } }],
+      },
+      data: { claimedAt: now, claimedBy: EXECUTOR_INSTANCE_ID },
+    });
+
+    return count === 1;
+  }
+
+  /**
+   * Releases this instance's claim on a subscription. Scoped by `claimedBy` so
+   * an instance whose claim already expired and was taken over cannot clear
+   * the new owner's claim. A failed release is only logged: the TTL still
+   * recovers the subscription, so it must not fail the tick.
+   */
+  private async releaseClaim(subscriptionId: number): Promise<void> {
+    try {
+      await prisma.subscription.updateMany({
+        where: { id: subscriptionId, claimedBy: EXECUTOR_INSTANCE_ID },
+        data: { claimedAt: null, claimedBy: null },
+      });
+    } catch (error) {
+      log("error", "SubscriptionExecutor failed to release claim", {
+        subscriptionId,
+        error: (error as Error).message,
+      });
     }
   }
 

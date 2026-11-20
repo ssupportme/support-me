@@ -41,6 +41,7 @@ describe('CreatorProfilePage JSON-LD', () => {
       bio: 'Building cool things on Stellar.',
       avatarUrl: 'https://cdn.example.com/avatar.png',
       donationGoal: null,
+      updatedAt: '2026-05-01T12:00:00.000Z',
     });
 
     const page = await CreatorProfilePage({ params: Promise.resolve({ username: 'awesome_dev' }) });
@@ -58,6 +59,7 @@ describe('CreatorProfilePage JSON-LD', () => {
       },
     });
     expect(jsonLd.mainEntity.url).toContain('/awesome_dev');
+    expect(jsonLd.dateModified).toBe('2026-05-01T12:00:00.000Z');
   });
 
   it('falls back to username and a default description when displayName/bio are missing', async () => {
@@ -67,6 +69,7 @@ describe('CreatorProfilePage JSON-LD', () => {
       bio: null,
       avatarUrl: null,
       donationGoal: null,
+      updatedAt: '2026-05-01T12:00:00.000Z',
     });
 
     const page = await CreatorProfilePage({ params: Promise.resolve({ username: 'plain_creator' }) });

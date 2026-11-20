@@ -35,7 +35,10 @@ export async function generateMetadata({ params }: { params: ParamsPromise }): P
     title,
     description,
     alternates: {
-      canonical: `/${username}`,
+      // Canonicalise to the stored casing so /Alice and /alice do not look
+      // like two different profiles when the API resolves usernames
+      // case-insensitively (#459).
+      canonical: `/${creator.username}`,
     },
     robots: {
       index: true,
@@ -93,7 +96,7 @@ function buildCreatorJsonLd(creator: NonNullable<Awaited<ReturnType<typeof fetch
   return {
     '@context': 'https://schema.org',
     '@type': 'ProfilePage',
-    dateModified: new Date().toISOString(),
+    dateModified: creator.updatedAt,
     mainEntity: {
       '@type': 'Person',
       name,
