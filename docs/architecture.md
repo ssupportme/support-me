@@ -199,6 +199,39 @@ flowchart TD
   - Validate all mutating requests with Zod schemas and return consistent
     error shapes via centralized error-handling middleware.
 
+## Subscription Executor and Multiple Instances (#394)
+
+The subscription executor (`backend/src/services/subscriptionExecutor.ts`)
+charges due recurring donations from a `setInterval` loop. It is **safe to run
+on several backend instances at once** — a Railway scale-up, a rolling deploy
+where old and new processes overlap, or a contributor's local backend pointing
+at a shared database. The in-process `running` flag only prevents overlapping
+ticks inside one process; it says nothing about another process.
+
+Cross-instance safety comes from a database claim on the subscription row:
+
+- Before charging, `tick()` runs one conditional `UPDATE` (`claim()`) that
+  matches the subscription only while it is still `active` and due and is
+  either unclaimed or holds a claim older than
+  `SUBSCRIPTION_EXECUTOR_CLAIM_TTL_MS`. Postgres serialises the competing
+  updates on the row, so exactly one instance's update reports a claimed row;
+  the others skip it for this tick. This gives the same guarantee as
+  `SELECT ... FOR UPDATE SKIP LOCKED`, without holding a transaction open
+  across the on-chain submission.
+- The claim is released in a `finally` after the charge attempt — on success,
+  on a recorded failure, and on an executor-side error — so the next tick can
+  see the new `nextChargeAt` or retry the charge.
+- A claim left behind by a crashed instance (no release) stops matching once
+  it is older than the TTL, so a later tick on any instance takes it over and
+  charges the subscription. Configure the TTL with
+  `SUBSCRIPTION_EXECUTOR_CLAIM_TTL_MS` (default 5 minutes); it should exceed
+  the longest possible charge attempt (confirmation alone waits up to 30s).
+
+`claimedAt`/`claimedBy` (schema migration
+`20261120120000_add_subscription_claim`) hold the claim and identify the
+instance for diagnostics; a release is scoped to the claiming instance so an
+instance whose claim already expired cannot clear a newer owner's claim.
+
 ## Anchor / Fiat Flow (SEP-24 deposit & withdraw)
 
 ```mermaid

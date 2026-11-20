@@ -81,6 +81,7 @@ as well if the listener needs a non-default endpoint.
 | `EXECUTOR_SECRET_KEY` | Required for normal backend startup because the subscription executor is started with the server. | None. This operational Stellar key must be registered as the donation contract executor and funded for transaction fees. Do not reuse a user wallet or commit the secret. On testnet/futurenet a missing account is auto-funded via Friendbot at startup (#279). |
 | `SUBSCRIPTION_EXECUTOR_POLL_INTERVAL_MS` | Optional. | `60000` ms. |
 | `SUBSCRIPTION_EXECUTOR_EXPECTED_INTERVAL_MS` | Optional. | Three times the polling interval, or `180000` ms with the default poll interval. Used by executor health reporting. |
+| `SUBSCRIPTION_EXECUTOR_CLAIM_TTL_MS` | Optional. | `300000` ms. How long one backend instance's claim on a due subscription is held before another instance may take it over. This recovers charges abandoned by a crashed instance (#394); keep it comfortably above the longest possible charge attempt. |
 | `FRIENDBOT_URL` | Optional. | `https://friendbot.stellar.org`. Endpoint used to auto-fund a missing executor account on testnet/futurenet; never called on mainnet. |
 | `EXECUTOR_LOW_BALANCE_XLM` | Optional. | `0.5`. XLM balance below which `/health/executor` reports `lowBalance: true`. |
 | `GOAL_RESET_CHECK_INTERVAL_MS` | Optional. | `3600000` ms (one hour). |
