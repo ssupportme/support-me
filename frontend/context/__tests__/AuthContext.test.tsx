@@ -17,6 +17,16 @@ function jsonResponse(body: unknown, ok = true) {
   return { ok, json: async () => body } as Response;
 }
 
+// A 502 or HTML error page: res.json() throws, like a real Response would.
+function htmlErrorResponse() {
+  return {
+    ok: false,
+    json: async () => {
+      throw new SyntaxError('Unexpected token < in JSON at position 0');
+    },
+  } as unknown as Response;
+}
+
 describe('AuthContext', () => {
   beforeEach(() => {
     localStorage.clear();
@@ -259,6 +269,83 @@ describe('AuthContext', () => {
 
       await expect(result.current.verifyMagicLink('used-token')).rejects.toThrow(
         'This magic link has already been used'
+      );
+    });
+  });
+
+  describe('non-JSON error responses (#452)', () => {
+    it('wallet challenge: a 502 HTML page shows the fallback message', async () => {
+      mockConnectWallet.mockResolvedValue('GABC');
+      const fetchMock = vi.mocked(fetch);
+      fetchMock.mockResolvedValueOnce(htmlErrorResponse());
+
+      const { result } = renderHook(() => useAuth(), { wrapper: AuthProvider });
+      await waitFor(() => expect(result.current.loading).toBe(false));
+
+      await expect(result.current.loginWithWallet()).rejects.toThrow(
+        'Failed to start sign-in challenge'
+      );
+    });
+
+    it('wallet verify: a 502 HTML page shows the fallback message', async () => {
+      mockConnectWallet.mockResolvedValue('GABC');
+      mockSignMessage.mockResolvedValue('signed-message');
+      const fetchMock = vi.mocked(fetch);
+      fetchMock
+        .mockResolvedValueOnce(jsonResponse({ message: 'sign this' }))
+        .mockResolvedValueOnce(htmlErrorResponse());
+
+      const { result } = renderHook(() => useAuth(), { wrapper: AuthProvider });
+      await waitFor(() => expect(result.current.loading).toBe(false));
+
+      await expect(result.current.loginWithWallet()).rejects.toThrow('Sign-in verification failed');
+    });
+
+    it('Twitter redirect: a 502 HTML page shows the fallback message', async () => {
+      const fetchMock = vi.mocked(fetch);
+      fetchMock.mockResolvedValueOnce(htmlErrorResponse());
+
+      const { result } = renderHook(() => useAuth(), { wrapper: AuthProvider });
+      await waitFor(() => expect(result.current.loading).toBe(false));
+
+      await expect(result.current.getTwitterRedirectUrl()).rejects.toThrow(
+        'Failed to start Twitter sign-in'
+      );
+    });
+
+    it('Twitter callback: a 502 HTML page shows the fallback message', async () => {
+      const fetchMock = vi.mocked(fetch);
+      fetchMock.mockResolvedValueOnce(htmlErrorResponse());
+
+      const { result } = renderHook(() => useAuth(), { wrapper: AuthProvider });
+      await waitFor(() => expect(result.current.loading).toBe(false));
+
+      await expect(result.current.completeTwitterLogin('code', 'state')).rejects.toThrow(
+        'Twitter sign-in failed'
+      );
+    });
+
+    it('magic link request: a 502 HTML page shows the fallback message', async () => {
+      const fetchMock = vi.mocked(fetch);
+      fetchMock.mockResolvedValueOnce(htmlErrorResponse());
+
+      const { result } = renderHook(() => useAuth(), { wrapper: AuthProvider });
+      await waitFor(() => expect(result.current.loading).toBe(false));
+
+      await expect(result.current.requestMagicLink('you@example.com')).rejects.toThrow(
+        'Failed to send magic link'
+      );
+    });
+
+    it('magic link verify: a 502 HTML page shows the fallback message', async () => {
+      const fetchMock = vi.mocked(fetch);
+      fetchMock.mockResolvedValueOnce(htmlErrorResponse());
+
+      const { result } = renderHook(() => useAuth(), { wrapper: AuthProvider });
+      await waitFor(() => expect(result.current.loading).toBe(false));
+
+      await expect(result.current.verifyMagicLink('the-token')).rejects.toThrow(
+        'This magic link is invalid or has expired'
       );
     });
   });
