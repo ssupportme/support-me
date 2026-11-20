@@ -102,4 +102,16 @@ describe('POST /api/cloudinary-sign (#364)', () => {
 
     expect(res.status).toBe(501);
   });
+
+  it('fails closed with 401 when the backend cannot be reached at all', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => {
+      throw new Error('backend down');
+    }));
+
+    const res = await POST(authedRequest());
+    const body = await res.json();
+
+    expect(res.status).toBe(401);
+    expect(body.signature).toBeUndefined();
+  });
 });

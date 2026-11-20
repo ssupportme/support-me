@@ -14,15 +14,24 @@ const sign = {
   transformation: 'c_limit,w_512,h_512',
 };
 
+let fakeImageSize = { width: 100, height: 100 };
+let fakeImageFails = false;
+
 beforeEach(() => {
+  fakeImageSize = { width: 100, height: 100 };
+  fakeImageFails = false;
   // validateImageDimensions loads the file through the DOM Image API.
   class FakeImage {
     onload: (() => void) | null = null;
     onerror: (() => void) | null = null;
-    width = 100;
-    height = 100;
+    get width() {
+      return fakeImageSize.width;
+    }
+    get height() {
+      return fakeImageSize.height;
+    }
     set src(_: string) {
-      setTimeout(() => this.onload?.(), 0);
+      setTimeout(() => (fakeImageFails ? this.onerror?.() : this.onload?.()), 0);
     }
   }
   vi.stubGlobal('Image', FakeImage as unknown as typeof Image);
@@ -75,5 +84,100 @@ describe('uploadAvatar (#364)', () => {
 
     await expect(uploadAvatar(makeFile(), null)).rejects.toThrow(UploadError);
     await expect(uploadAvatar(makeFile(), null)).rejects.toThrow('Authentication required');
+  });
+
+  it('rejects a non-image file before any network call', async () => {
+    const fetchMock = vi.fn(async () => new Response('{}', { status: 200 }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(uploadAvatar(makeFile(1024, 'text/plain'), null)).rejects.toThrow(
+      'Please choose a JPEG, PNG, WebP, or GIF image.'
+    );
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('rejects a file over 5 MB before any network call', async () => {
+    const fetchMock = vi.fn(async () => new Response('{}', { status: 200 }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(uploadAvatar(makeFile(5 * 1024 * 1024 + 1), null)).rejects.toThrow(
+      'Image is too large — please keep it under 5 MB.'
+    );
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('rejects an image whose dimensions exceed 4096px', async () => {
+    fakeImageSize = { width: 5000, height: 100 };
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('{}', { status: 200 })));
+
+    await expect(uploadAvatar(makeFile(), null)).rejects.toThrow('Maximum allowed is 4096');
+  });
+
+  it('rejects an image whose dimensions cannot be read', async () => {
+    fakeImageFails = true;
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('{}', { status: 200 })));
+
+    await expect(uploadAvatar(makeFile(), null)).rejects.toThrow(
+      'Could not read image dimensions. Please try a different image.'
+    );
+  });
+
+  it('returns the secure URL on a full successful upload', async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = typeof input === 'string' ? input : input.toString();
+      if (url === '/api/cloudinary-sign') {
+        return new Response(JSON.stringify(sign), { status: 200 });
+      }
+      return new Response(JSON.stringify({ secure_url: 'https://cdn.test/avatar.png' }), {
+        status: 200,
+      });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(uploadAvatar(makeFile(), 'jwt-token')).resolves.toBe('https://cdn.test/avatar.png');
+  });
+
+  it('reports a signing failure with no error body as a generic UploadError', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('{}', { status: 500 })));
+
+    await expect(uploadAvatar(makeFile(), null)).rejects.toThrow('Could not start the upload.');
+  });
+
+  it('reports an unreachable signing service as an UploadError', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => {
+      throw new Error('network down');
+    }));
+
+    await expect(uploadAvatar(makeFile(), null)).rejects.toThrow('Could not reach the upload service.');
+  });
+
+  it('surfaces the Cloudinary error message when the upload itself fails', async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = typeof input === 'string' ? input : input.toString();
+      if (url === '/api/cloudinary-sign') {
+        return new Response(JSON.stringify(sign), { status: 200 });
+      }
+      return new Response(JSON.stringify({ error: { message: 'Invalid image file' } }), {
+        status: 400,
+      });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(uploadAvatar(makeFile(), null)).rejects.toThrow('Invalid image file');
+  });
+
+  it('reports a missing secure URL after a successful upload', async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = typeof input === 'string' ? input : input.toString();
+      if (url === '/api/cloudinary-sign') {
+        return new Response(JSON.stringify(sign), { status: 200 });
+      }
+      return new Response(JSON.stringify({}), { status: 200 });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(uploadAvatar(makeFile(), null)).rejects.toThrow(
+      'Upload succeeded but no image URL was returned.'
+    );
   });
 });

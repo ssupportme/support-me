@@ -27,7 +27,7 @@ interface Bucket {
   count: number;
 }
 
-function buildBuckets(donations: Donation[], days: number | null): { buckets: Bucket[]; unit: string } {
+export function buildBuckets(donations: Donation[], days: number | null): { buckets: Bucket[]; unit: string } {
   const now = Date.now();
   const dayMs = 86_400_000;
 
