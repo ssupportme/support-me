@@ -15,10 +15,17 @@ jest.mock("../../prisma", () => ({
   },
 }));
 
+jest.mock("../../services/donationNotifications", () => ({
+  notifyGoalsReached: jest.fn().mockResolvedValue(undefined),
+}));
+
 import request from "supertest";
 import app from "../../app";
 import prisma from "../../prisma";
+import { notifyGoalsReached } from "../../services/donationNotifications";
 import { generateToken } from "../../middleware/auth";
+
+const mockedNotifyGoalsReached = notifyGoalsReached as jest.Mock;
 
 const mockedPrisma = prisma as unknown as {
   creator: { findUnique: jest.Mock };
@@ -320,6 +327,172 @@ describe("PUT /api/goals/:id", () => {
       where: { id: 1 },
       data: { title: "Buy a new laptop", description: null, targetAmount: 750 },
     });
+  });
+
+  it("completes an ACTIVE goal and sends one email when the target is lowered to the current amount (issue #442)", async () => {
+    mockedPrisma.goal.findUnique.mockResolvedValue({
+      id: 1,
+      creator: { userId: 1 },
+      currentAmount: 120,
+      targetAmount: 500,
+      recurring: false,
+      status: "ACTIVE",
+    });
+    mockedPrisma.goal.update.mockResolvedValue({ id: 1, currentAmount: 120, targetAmount: 120, status: "COMPLETED" });
+
+    const res = await request(app)
+      .put("/api/goals/1")
+      .set("Authorization", `Bearer ${token}`)
+      .send({ targetAmount: 120 });
+
+    expect(res.status).toBe(200);
+    expect(res.body.status).toBe("COMPLETED");
+    expect(mockedPrisma.goal.update).toHaveBeenCalledWith({
+      where: { id: 1 },
+      data: { targetAmount: 120, status: "COMPLETED" },
+    });
+    expect(mockedNotifyGoalsReached).toHaveBeenCalledTimes(1);
+    expect(mockedNotifyGoalsReached).toHaveBeenCalledWith([
+      { id: 1, currentAmount: 120, targetAmount: 120, status: "COMPLETED" },
+    ]);
+  });
+
+  it("completes an ACTIVE goal when the target is lowered below the current amount (issue #442)", async () => {
+    mockedPrisma.goal.findUnique.mockResolvedValue({
+      id: 1,
+      creator: { userId: 1 },
+      currentAmount: 120,
+      targetAmount: 500,
+      recurring: false,
+      status: "ACTIVE",
+    });
+    mockedPrisma.goal.update.mockResolvedValue({ id: 1, currentAmount: 120, targetAmount: 100, status: "COMPLETED" });
+
+    const res = await request(app)
+      .put("/api/goals/1")
+      .set("Authorization", `Bearer ${token}`)
+      .send({ targetAmount: 100 });
+
+    expect(res.status).toBe(200);
+    expect(res.body.status).toBe("COMPLETED");
+    expect(mockedNotifyGoalsReached).toHaveBeenCalledTimes(1);
+  });
+
+  it("leaves an ACTIVE goal alone when the lowered target is still above the current amount", async () => {
+    mockedPrisma.goal.findUnique.mockResolvedValue({
+      id: 1,
+      creator: { userId: 1 },
+      currentAmount: 120,
+      targetAmount: 500,
+      recurring: false,
+      status: "ACTIVE",
+    });
+    mockedPrisma.goal.update.mockResolvedValue({ id: 1, currentAmount: 120, targetAmount: 200, status: "ACTIVE" });
+
+    const res = await request(app)
+      .put("/api/goals/1")
+      .set("Authorization", `Bearer ${token}`)
+      .send({ targetAmount: 200 });
+
+    expect(res.status).toBe(200);
+    expect(res.body.status).toBe("ACTIVE");
+    expect(mockedPrisma.goal.update).toHaveBeenCalledWith({
+      where: { id: 1 },
+      data: { targetAmount: 200 },
+    });
+    expect(mockedNotifyGoalsReached).not.toHaveBeenCalled();
+  });
+
+  it("does not complete a recurring goal when its target is lowered below the current amount", async () => {
+    mockedPrisma.goal.findUnique.mockResolvedValue({
+      id: 1,
+      creator: { userId: 1 },
+      currentAmount: 120,
+      targetAmount: 500,
+      recurring: true,
+      recurrenceInterval: "MONTHLY",
+      status: "ACTIVE",
+    });
+    mockedPrisma.goal.update.mockResolvedValue({ id: 1, currentAmount: 120, targetAmount: 100, status: "ACTIVE" });
+
+    const res = await request(app)
+      .put("/api/goals/1")
+      .set("Authorization", `Bearer ${token}`)
+      .send({ targetAmount: 100 });
+
+    expect(res.status).toBe(200);
+    expect(res.body.status).toBe("ACTIVE");
+    expect(mockedPrisma.goal.update).toHaveBeenCalledWith({
+      where: { id: 1 },
+      data: { targetAmount: 100 },
+    });
+    expect(mockedNotifyGoalsReached).not.toHaveBeenCalled();
+  });
+
+  it("rejects reopening a COMPLETED goal that is already at or above its target (issue #442)", async () => {
+    mockedPrisma.goal.findUnique.mockResolvedValue({
+      id: 1,
+      creator: { userId: 1 },
+      currentAmount: 120,
+      targetAmount: 100,
+      recurring: false,
+      status: "COMPLETED",
+    });
+
+    const res = await request(app)
+      .put("/api/goals/1")
+      .set("Authorization", `Bearer ${token}`)
+      .send({ status: "ACTIVE" });
+
+    expect(res.status).toBe(400);
+    expect(res.body.code).toBe("BAD_REQUEST");
+    expect(mockedPrisma.goal.update).not.toHaveBeenCalled();
+    expect(mockedNotifyGoalsReached).not.toHaveBeenCalled();
+  });
+
+  it("rejects reopening an EXPIRED goal that is already at or above its target", async () => {
+    mockedPrisma.goal.findUnique.mockResolvedValue({
+      id: 1,
+      creator: { userId: 1 },
+      currentAmount: 120,
+      targetAmount: 100,
+      recurring: false,
+      status: "EXPIRED",
+    });
+
+    const res = await request(app)
+      .put("/api/goals/1")
+      .set("Authorization", `Bearer ${token}`)
+      .send({ status: "ACTIVE" });
+
+    expect(res.status).toBe(400);
+    expect(res.body.code).toBe("BAD_REQUEST");
+    expect(mockedPrisma.goal.update).not.toHaveBeenCalled();
+  });
+
+  it("allows reopening a COMPLETED goal that is still below its target", async () => {
+    mockedPrisma.goal.findUnique.mockResolvedValue({
+      id: 1,
+      creator: { userId: 1 },
+      currentAmount: 50,
+      targetAmount: 100,
+      recurring: false,
+      status: "COMPLETED",
+    });
+    mockedPrisma.goal.update.mockResolvedValue({ id: 1, currentAmount: 50, targetAmount: 100, status: "ACTIVE" });
+
+    const res = await request(app)
+      .put("/api/goals/1")
+      .set("Authorization", `Bearer ${token}`)
+      .send({ status: "ACTIVE" });
+
+    expect(res.status).toBe(200);
+    expect(res.body.status).toBe("ACTIVE");
+    expect(mockedPrisma.goal.update).toHaveBeenCalledWith({
+      where: { id: 1 },
+      data: { status: "ACTIVE" },
+    });
+    expect(mockedNotifyGoalsReached).not.toHaveBeenCalled();
   });
 });
 

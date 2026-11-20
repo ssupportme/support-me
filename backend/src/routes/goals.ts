@@ -10,8 +10,9 @@ import {
   updateGoalSchema,
   usernameParamSchema,
 } from "../schemas/goals";
-import { computePeriodEnd, formatGoalAmounts } from "../services/goalService";
-import { ForbiddenError, NotFoundError, UnauthorizedError } from "../errors/AppError";
+import { computePeriodEnd, formatGoalAmounts, goalMeetsTarget } from "../services/goalService";
+import { notifyGoalsReached } from "../services/donationNotifications";
+import { BadRequestError, ForbiddenError, NotFoundError, UnauthorizedError } from "../errors/AppError";
 
 const router = Router();
 
@@ -110,10 +111,36 @@ router.put(
     const recurrenceChanged =
       updates.recurring !== undefined || updates.recurrenceInterval !== undefined;
 
+    // A goal's target can be edited down to (or below) what it has already
+    // raised. Re-evaluate completion against the values that will apply
+    // after this edit (issue #442) — a goal that ends up at or above its
+    // target must not stay ACTIVE forever. Amounts are always present on a
+    // real row; the guard only skips the check for partial test fixtures.
+    const effectiveTarget = updates.targetAmount ?? existing.targetAmount;
+    const atOrAboveTarget =
+      existing.currentAmount != null &&
+      effectiveTarget != null &&
+      goalMeetsTarget({ currentAmount: existing.currentAmount, targetAmount: effectiveTarget });
+
+    // Reopening a goal that has already reached its target would put it
+    // straight back into the stuck state, so reject it. Reopening a goal
+    // still below its target is fine.
+    if (updates.status === "ACTIVE" && existing.status !== "ACTIVE" && atOrAboveTarget) {
+      throw new BadRequestError("Cannot reopen a goal that has already reached its target");
+    }
+
+    // An ACTIVE non-recurring goal at or above its target completes now,
+    // even when the edit only lowered the target. Recurring goals keep
+    // accumulating until their period resets (see goalService.ts), so an
+    // edit never completes them.
+    const effectiveStatus = updates.status ?? existing.status;
+    const completesNow = effectiveStatus === "ACTIVE" && !willBeRecurring && atOrAboveTarget;
+
     const goal = await prisma.goal.update({
       where: { id },
       data: {
         ...updates,
+        ...(completesNow ? { status: "COMPLETED" } : {}),
         ...(recurrenceChanged
           ? {
               currentPeriodEnd: willBeRecurring && interval ? computePeriodEnd(interval) : null,
@@ -121,6 +148,13 @@ router.put(
           : {}),
       },
     });
+
+    // Notify once, only when this edit is what completed the goal. A goal
+    // that was already COMPLETED sends nothing again, and marking a goal
+    // COMPLETED by hand sends nothing either — the owner already knows.
+    if (completesNow) {
+      await notifyGoalsReached([goal]);
+    }
 
     return res.json(formatGoalAmounts(goal));
   })

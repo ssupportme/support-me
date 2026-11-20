@@ -11,6 +11,14 @@ export function formatGoalAmounts<T extends { targetAmount?: unknown; currentAmo
 }
 
 /**
+ * True when a goal's current amount has reached its target. Decimal
+ * comparison, so 0.1 ten times reaches a target of 1 exactly (#372).
+ */
+export function goalMeetsTarget(goal: { currentAmount: MoneyValue; targetAmount: MoneyValue }): boolean {
+  return new Prisma.Decimal(goal.currentAmount).gte(new Prisma.Decimal(goal.targetAmount));
+}
+
+/**
  * Shared goal logic used by the donation-recording routes
  * (routes/donations.ts, services/subscriptionExecutor.ts) and by the
  * recurring-reset scheduler (services/goalResetScheduler.ts).
@@ -99,13 +107,24 @@ async function applyAmountToGoal(
   if (claimed.count === 0) {
     // The goal was already at/above its target when this donation arrived
     // (a later donation in the same period, or a concurrent donation already
-    // carried it over) — still apply the amount so no progress is lost,
-    // just without reporting a "reached" event.
+    // carried it over) — still apply the amount so no progress is lost.
     await client.goal.update({
       where: { id: goal.id },
       data: { currentAmount: { increment: amount } },
     });
-    return null;
+    // A non-recurring goal stuck above its target (issue #442: its target
+    // was lowered by an edit, or it was already over target) completes now
+    // instead of staying ACTIVE forever, and reports once so the creator
+    // gets the goal-reached email. Recurring goals keep accumulating by
+    // design and never complete, so they are left alone here too.
+    if (goal.recurring) return null;
+    const alreadyThere = await client.goal.findUnique({ where: { id: goal.id } });
+    if (!alreadyThere || !goalMeetsTarget(alreadyThere)) return null;
+    const flipped = await client.goal.updateMany({
+      where: { id: goal.id, status: "ACTIVE" },
+      data: { status: "COMPLETED" },
+    });
+    return flipped.count === 1 ? { ...alreadyThere, status: "COMPLETED" as const } : null;
   }
 
   const updated = await client.goal.findUnique({ where: { id: goal.id } });

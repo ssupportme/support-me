@@ -251,6 +251,18 @@ describe("applyDonationToGoals", () => {
     expect(rows.get(2)!.currentAmount).toBe(130);
   });
 
+  it("completes a non-recurring goal already at its target when a donation lands on it (issue #442)", async () => {
+    const rows = createGoalStore([
+      { id: 1, creatorId: 1, currency: "XLM", currentAmount: 120, targetAmount: 100, recurring: false, status: "ACTIVE" },
+    ]);
+
+    const reached = await applyDonationToGoals(fakeTransactionClient(), 1, "XLM", 10);
+
+    expect(rows.get(1)!.currentAmount).toBe(130);
+    expect(rows.get(1)!.status).toBe("COMPLETED");
+    expect(reached).toEqual([expect.objectContaining({ id: 1, currentAmount: 130, status: "COMPLETED" })]);
+  });
+
   it("only touches goals denominated in the donated currency", async () => {
     // findMany is already filtered by currency in the query itself, but this
     // asserts the call shape so a regression (e.g. dropping the `currency`
