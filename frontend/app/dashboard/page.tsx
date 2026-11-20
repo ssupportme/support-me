@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useRef, useLayoutEffect, useMemo } from 'react';
+import { useState, useEffect, useRef, useLayoutEffect, useMemo, useCallback } from 'react';
 import Link from 'next/link';
 import { notify } from '@/lib/notify';
 import { donationsCsvFilename, donationsToCsv, downloadCsv } from '@/lib/csv';
@@ -85,47 +85,51 @@ export default function DashboardPage() {
     }
   }, [donations]);
 
-  useEffect(() => {
+  const fetchData = useCallback(async () => {
     if (!user || !token || !creator) return;
 
-    const fetchData = async () => {
-      try {
-        const [resDonations, resWithdrawals] = await Promise.all([
-          fetch(`${API_URL}/api/donations?creatorUsername=${encodeURIComponent(creator.username)}&page=1&limit=20`, {
-            headers: { 'Authorization': `Bearer ${token}` },
-          }),
-          fetch(`${API_URL}/api/withdrawals?creatorUsername=${creator.username}`, {
-            headers: { 'Authorization': `Bearer ${token}` },
-          }),
-        ]);
+    setError('');
+    try {
+      const [resDonations, resWithdrawals] = await Promise.all([
+        fetch(`${API_URL}/api/donations?creatorUsername=${encodeURIComponent(creator.username)}&page=1&limit=20`, {
+          headers: { 'Authorization': `Bearer ${token}` },
+        }),
+        fetch(`${API_URL}/api/withdrawals?creatorUsername=${encodeURIComponent(creator.username)}`, {
+          headers: { 'Authorization': `Bearer ${token}` },
+        }),
+      ]);
 
-        if (resDonations.ok) {
-          const donationsData = await resDonations.json();
-          const items = Array.isArray(donationsData) ? donationsData : donationsData.items || [];
-          setDonations(items);
-          setDonationPage(1);
-          if (donationsData.pagination) {
-            setTotalDonations(donationsData.pagination.total);
-            setTotalPages(donationsData.pagination.totalPages);
-            setHasMoreDonations(donationsData.pagination.page < donationsData.pagination.totalPages);
-          } else {
-            setTotalDonations(Array.isArray(donationsData) ? donationsData.length : items.length);
-            setTotalPages(1);
-            setHasMoreDonations(false);
-          }
-        }
-
-        if (resWithdrawals.ok) {
-          const withdrawalsData = await resWithdrawals.json();
-          setWithdrawals(Array.isArray(withdrawalsData) ? withdrawalsData : []);
-        }
-      } catch (err) {
-        setError((err as Error).message);
+      if (!resDonations.ok) {
+        throw new Error('The server returned an error. Please try again.');
       }
-    };
+      if (!resWithdrawals.ok) {
+        throw new Error('The server returned an error. Please try again.');
+      }
 
-    fetchData();
+      const donationsData = await resDonations.json();
+      const items = Array.isArray(donationsData) ? donationsData : donationsData.items || [];
+      setDonations(items);
+      setDonationPage(1);
+      if (donationsData.pagination) {
+        setTotalDonations(donationsData.pagination.total);
+        setTotalPages(donationsData.pagination.totalPages);
+        setHasMoreDonations(donationsData.pagination.page < donationsData.pagination.totalPages);
+      } else {
+        setTotalDonations(Array.isArray(donationsData) ? donationsData.length : items.length);
+        setTotalPages(1);
+        setHasMoreDonations(false);
+      }
+
+      const withdrawalsData = await resWithdrawals.json();
+      setWithdrawals(Array.isArray(withdrawalsData) ? withdrawalsData : []);
+    } catch (err) {
+      setError((err as Error).message || 'The server returned an error. Please try again.');
+    }
   }, [user, token, creator]);
+
+  useEffect(() => {
+    fetchData();
+  }, [fetchData]);
 
   const [exporting, setExporting] = useState(false);
 
@@ -395,12 +399,19 @@ export default function DashboardPage() {
           </div>
 
           {error && (
-            <div className="card-brutal bg-brand-pink p-4 mb-6 text-ink font-bold">
-              {error}
+            <div className="card-brutal bg-brand-pink p-4 mb-6 text-ink font-bold flex items-center justify-between gap-4">
+              <span>{error}</span>
+              <button
+                type="button"
+                onClick={() => fetchData()}
+                className="px-3 py-1 bg-red-600 text-white font-bold rounded text-xs hover:bg-red-700 transition-colors shrink-0"
+              >
+                Retry
+              </button>
             </div>
           )}
 
-          {donations.length === 0 ? (
+          {donations.length === 0 && !error ? (
             /* No tips yet — a zeroed stats grid and an empty chart would read as
                broken, so show an encouraging empty state with a share CTA instead. */
             <div className="card-brutal bg-card p-10 text-center mb-8">
@@ -585,7 +596,6 @@ export default function DashboardPage() {
                           target="_blank"
                           rel="noopener noreferrer"
                           title="View transaction on Stellar Expert"
-                          className="block -mx-2 px-2 rounded hover:bg-accent-bg focus:bg-accent-bg focus-visible:outline-[3px] focus-visible:outline-focus-ring focus-visible:outline-offset-2 transition-colors"
                         >
                           {row}
                         </a>
