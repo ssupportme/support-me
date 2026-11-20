@@ -93,6 +93,33 @@ pub fn extend_subscription_ttl<K: IntoVal<Env, Val>>(env: &Env, key: &K, interva
     );
 }
 
+/// TTL, in ledgers, an admin proposal, approval, or cancellation entry should
+/// be extended to: comfortably longer than its maximum lifetime (expiry plus
+/// timelock delay), but never less than [`PERSISTENT_BUMP_AMOUNT`] and never
+/// more than [`PERSISTENT_MAX_BUMP_AMOUNT`].
+pub fn proposal_bump_amount(timelock_delay_secs: u64) -> u32 {
+    let lifetime_secs = ADMIN_PROPOSAL_TTL_SECONDS.saturating_add(timelock_delay_secs);
+    let lifetime_ledgers = lifetime_secs.div_ceil(SECONDS_PER_LEDGER);
+    let wanted = lifetime_ledgers.saturating_add(30 * DAY_IN_LEDGERS as u64);
+    let clamped = wanted.clamp(
+        PERSISTENT_BUMP_AMOUNT as u64,
+        PERSISTENT_MAX_BUMP_AMOUNT as u64,
+    );
+    clamped as u32
+}
+
+/// Extends an admin proposal, approval, or cancellation entry to
+/// [`proposal_bump_amount`] for the configured timelock delay, once the
+/// remaining TTL falls 30 days below that target.
+pub fn extend_proposal_ttl<K: IntoVal<Env, Val>>(env: &Env, key: &K, timelock_delay_secs: u64) {
+    let extend_to = proposal_bump_amount(timelock_delay_secs);
+    env.storage().persistent().extend_ttl(
+        key,
+        extend_to.saturating_sub(30 * DAY_IN_LEDGERS),
+        extend_to,
+    );
+}
+
 /// Extends the TTL of the current contract's instance storage (and Wasm code)
 /// to [`INSTANCE_BUMP_AMOUNT`] when it has fallen below
 /// [`INSTANCE_LIFETIME_THRESHOLD`].
@@ -238,5 +265,21 @@ mod tests {
             PERSISTENT_MAX_BUMP_AMOUNT
         );
         const _: () = assert!(PERSISTENT_MAX_BUMP_AMOUNT < 180 * DAY_IN_LEDGERS);
+    }
+
+    #[test]
+    fn proposal_bump_amount_scales_with_timelock_within_bounds() {
+        // Zero or short timelock gets the floor (~90 days).
+        assert_eq!(proposal_bump_amount(0), PERSISTENT_BUMP_AMOUNT);
+        assert_eq!(proposal_bump_amount(86_400), PERSISTENT_BUMP_AMOUNT);
+        // Large timelock scales between floor and cap:
+        // 60 days timelock: 7 + 60 + 30 = 97 days.
+        assert_eq!(proposal_bump_amount(60 * 86_400), 97 * DAY_IN_LEDGERS);
+        // Exceeding cap clamps to PERSISTENT_MAX_BUMP_AMOUNT (~150 days).
+        assert_eq!(
+            proposal_bump_amount(200 * 86_400),
+            PERSISTENT_MAX_BUMP_AMOUNT
+        );
+        assert_eq!(proposal_bump_amount(u64::MAX), PERSISTENT_MAX_BUMP_AMOUNT);
     }
 }
