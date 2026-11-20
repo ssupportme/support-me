@@ -21,7 +21,7 @@ import { checkSorobanRpc } from "./services/sorobanHealth";
 import { executorHealth } from "./services/executorHealth";
 import { eventListenerHealth } from "./services/eventListenerHealth";
 import { networkReset } from "./services/networkReset";
-import { getAllowedOrigins, getRateLimitConfig } from "./config";
+import { getAllowedOrigins, getRateLimitConfig, getTrustProxy } from "./config";
 import { TtlCache } from "./services/ttlCache";
 import { RateLimiter } from "./services/rateLimiter";
 import { clientIp, rateLimit } from "./middleware/rateLimit";
@@ -76,9 +76,12 @@ if (process.env.SENTRY_DSN) {
 
 // Set TRUST_PROXY to the number of reverse-proxy hops in front of the API (e.g.
 // 1 on Railway) so req.ip, and therefore the per-IP rate limits, reflects the
-// real client instead of the proxy. Unset keeps Express's default.
-if (process.env.TRUST_PROXY) {
-  app.set("trust proxy", Number(process.env.TRUST_PROXY));
+// real client instead of the proxy. Unset keeps Express's default. Parsed by
+// getTrustProxy (#439): a typo used to become NaN via Number() and reach
+// Express, silently breaking req.ip.
+const trustProxy = getTrustProxy();
+if (trustProxy !== undefined) {
+  app.set("trust proxy", trustProxy);
 }
 
 app.use(requestLogger);

@@ -4,7 +4,10 @@ import {
   getAllowedOrigins,
   getJwtSecret,
   getRateLimitConfig,
+  getTrustProxy,
+  validateConfig,
 } from "../../config";
+import { getStellarNetworkName } from "../../services/stellarNetwork";
 import { Keypair, Networks } from "@stellar/stellar-sdk";
 import {
   validateStellarNetworkSetup,
@@ -272,5 +275,139 @@ describe("Stellar network boot validation (#281)", () => {
 
     process.env.NODE_ENV = "production";
     await expect(validateStellarNetworkSetup(mismatch)).rejects.toThrow(/passphrase/i);
+  });
+});
+
+describe("startup validation of silent production misconfigurations (#439)", () => {
+  const trackedVars = [
+    "NODE_ENV",
+    "DONATION_CONTRACT_ID",
+    "NEXT_PUBLIC_DONATION_CONTRACT_ID",
+    "EXECUTOR_SECRET_KEY",
+    "DATABASE_URL",
+    "APP_URL",
+    "CORS_ALLOWED_ORIGINS",
+    "RESEND_API_KEY",
+    "TRUST_PROXY",
+    "STELLAR_NETWORK",
+    "NEXT_PUBLIC_STELLAR_NETWORK",
+  ] as const;
+  const originals = Object.fromEntries(trackedVars.map((name) => [name, process.env[name]]));
+
+  beforeEach(() => {
+    process.env.NODE_ENV = "production";
+    process.env.DONATION_CONTRACT_ID =
+      "CD6T563YCSYQHDMXC7VCFTKMWMXWHFHAU4NO7EAMFK57QLFI7SSXICYY";
+    delete process.env.NEXT_PUBLIC_DONATION_CONTRACT_ID;
+    process.env.EXECUTOR_SECRET_KEY = Keypair.random().secret();
+    process.env.DATABASE_URL = "postgresql://localhost:5432/supportme";
+    process.env.APP_URL = "https://supportme.app";
+    process.env.CORS_ALLOWED_ORIGINS = "https://supportme.app";
+    process.env.RESEND_API_KEY = "re_test_key";
+    delete process.env.TRUST_PROXY;
+    process.env.STELLAR_NETWORK = "testnet";
+    delete process.env.NEXT_PUBLIC_STELLAR_NETWORK;
+  });
+
+  afterAll(() => {
+    for (const name of trackedVars) {
+      const value = originals[name];
+      if (value === undefined) delete process.env[name];
+      else process.env[name] = value;
+    }
+  });
+
+  it("passes in production when every setting is configured", () => {
+    expect(() => validateConfig()).not.toThrow();
+  });
+
+  it("fails in production when APP_URL is missing", () => {
+    delete process.env.APP_URL;
+    expect(() => validateConfig()).toThrow(/APP_URL/);
+  });
+
+  it("fails in production when CORS_ALLOWED_ORIGINS is empty", () => {
+    delete process.env.CORS_ALLOWED_ORIGINS;
+    expect(() => validateConfig()).toThrow(/CORS_ALLOWED_ORIGINS/);
+  });
+
+  it("fails in production when RESEND_API_KEY is missing", () => {
+    delete process.env.RESEND_API_KEY;
+    expect(() => validateConfig()).toThrow(/RESEND_API_KEY/);
+  });
+
+  it("only warns in development when the production settings are missing", () => {
+    process.env.NODE_ENV = "development";
+    delete process.env.APP_URL;
+    delete process.env.CORS_ALLOWED_ORIGINS;
+    delete process.env.RESEND_API_KEY;
+    expect(() => validateConfig()).not.toThrow();
+  });
+
+  it("parses TRUST_PROXY as a hop count", () => {
+    process.env.TRUST_PROXY = "2";
+    expect(getTrustProxy()).toBe(2);
+  });
+
+  it("parses TRUST_PROXY as a boolean", () => {
+    process.env.TRUST_PROXY = "true";
+    expect(getTrustProxy()).toBe(true);
+    process.env.TRUST_PROXY = "false";
+    expect(getTrustProxy()).toBe(false);
+  });
+
+  it("parses TRUST_PROXY as a CIDR list", () => {
+    process.env.TRUST_PROXY = "10.0.0.0/8, 192.168.0.0/16";
+    expect(getTrustProxy()).toEqual(["10.0.0.0/8", "192.168.0.0/16"]);
+  });
+
+  it("returns undefined for TRUST_PROXY when unset", () => {
+    expect(getTrustProxy()).toBeUndefined();
+  });
+
+  it("rejects a TRUST_PROXY that is not a number (NaN)", () => {
+    process.env.TRUST_PROXY = "abc";
+    expect(() => getTrustProxy()).toThrow(/TRUST_PROXY/);
+  });
+
+  it("rejects a fractional TRUST_PROXY hop count", () => {
+    process.env.TRUST_PROXY = "1.5";
+    expect(() => getTrustProxy()).toThrow(/TRUST_PROXY/);
+  });
+
+  it("rejects a TRUST_PROXY CIDR entry with an out-of-range prefix", () => {
+    process.env.TRUST_PROXY = "10.0.0.0/33";
+    expect(() => getTrustProxy()).toThrow(/TRUST_PROXY/);
+  });
+
+  it("fails production startup on an unparseable TRUST_PROXY", () => {
+    process.env.TRUST_PROXY = "abc";
+    expect(() => validateConfig()).toThrow(/TRUST_PROXY/);
+  });
+
+  it("accepts the known Stellar networks", () => {
+    process.env.STELLAR_NETWORK = "testnet";
+    expect(getStellarNetworkName()).toBe("testnet");
+    process.env.STELLAR_NETWORK = "mainnet";
+    expect(getStellarNetworkName()).toBe("mainnet");
+    process.env.STELLAR_NETWORK = "public";
+    expect(getStellarNetworkName()).toBe("mainnet");
+    process.env.STELLAR_NETWORK = "futurenet";
+    expect(getStellarNetworkName()).toBe("futurenet");
+  });
+
+  it("defaults to testnet when STELLAR_NETWORK is unset", () => {
+    delete process.env.STELLAR_NETWORK;
+    expect(getStellarNetworkName()).toBe("testnet");
+  });
+
+  it("rejects an unknown STELLAR_NETWORK value instead of silently using testnet", () => {
+    process.env.STELLAR_NETWORK = "bogusnet";
+    expect(() => getStellarNetworkName()).toThrow(/STELLAR_NETWORK/);
+  });
+
+  it("fails production startup on an unknown STELLAR_NETWORK value", () => {
+    process.env.STELLAR_NETWORK = "bogusnet";
+    expect(() => validateConfig()).toThrow(/STELLAR_NETWORK/);
   });
 });

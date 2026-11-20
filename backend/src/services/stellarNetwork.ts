@@ -14,14 +14,22 @@ export function getStellarNetworkName(): StellarNetworkName {
   const raw = (
     process.env.STELLAR_NETWORK ||
     process.env.NEXT_PUBLIC_STELLAR_NETWORK ||
-    "testnet"
+    ""
   )
     .trim()
     .toLowerCase();
 
+  // Unset still defaults to testnet (existing behaviour); an explicitly set
+  // unknown value is a misconfiguration, not a testnet deployment (#439).
+  // Silently falling back to testnet here used to let a deployment sign
+  // transactions for the wrong chain.
+  if (!raw) return "testnet";
+  if (raw === "testnet") return "testnet";
   if (raw === "mainnet" || raw === "public") return "mainnet";
   if (raw === "futurenet") return "futurenet";
-  return "testnet";
+  throw new Error(
+    `STELLAR_NETWORK has an unknown value "${raw}": expected testnet, mainnet or futurenet`
+  );
 }
 
 const PASSPHRASES: Record<StellarNetworkName, string> = {

@@ -1,5 +1,6 @@
 import { randomBytes } from "crypto";
 import { log } from "./lib/logger";
+import { getStellarNetworkName } from "./services/stellarNetwork";
 
 /**
  * Central configuration and validation for environment settings whose absence
@@ -27,6 +28,8 @@ export const config = {
   get executorSecretKey() { return process.env.EXECUTOR_SECRET_KEY?.trim() || ""; },
   get databaseUrl() { return process.env.DATABASE_URL?.trim() || ""; },
   get jwtSecret() { return process.env.JWT_SECRET?.trim() || ""; },
+  get appUrl() { return process.env.APP_URL?.trim() || ""; },
+  get resendApiKey() { return process.env.RESEND_API_KEY?.trim() || ""; },
   get cloudinaryCloudName() { return process.env.CLOUDINARY_CLOUD_NAME?.trim() || ""; },
 };
 
@@ -103,6 +106,53 @@ export function validateConfig() {
 
   if (missing.length > 0) {
     const msg = `STARTUP CONFIGURATION: Missing required environment variables: ${missing.join(", ")}.`;
+    log("warn", msg);
+    if (process.env.NODE_ENV === "production") {
+      throw new Error(msg);
+    }
+  }
+
+  // #439: APP_URL, CORS_ALLOWED_ORIGINS and RESEND_API_KEY silently misbehave
+  // in production when unset: magic-link and notification emails point at
+  // https://localhost:3000, every browser origin is blocked, and sendEmail
+  // logs and drops the message while /api/auth/magic-link still says the
+  // link was sent. Fail startup in production; warn loudly elsewhere.
+  const productionMissing: string[] = [];
+  if (!config.appUrl) {
+    productionMissing.push("APP_URL (magic-link and notification emails default to https://localhost:3000)");
+  }
+  if (getAllowedOrigins().length === 0) {
+    productionMissing.push("CORS_ALLOWED_ORIGINS (no browser origin is allowed)");
+  }
+  if (!config.resendApiKey) {
+    productionMissing.push("RESEND_API_KEY (emails are logged and dropped, not sent)");
+  }
+
+  if (productionMissing.length > 0) {
+    const msg = `STARTUP CONFIGURATION: Missing production environment variables: ${productionMissing.join("; ")}.`;
+    log("warn", msg);
+    if (process.env.NODE_ENV === "production") {
+      throw new Error(msg);
+    }
+  }
+
+  // #439: TRUST_PROXY and STELLAR_NETWORK must parse. A bad value fails
+  // startup in production and warns elsewhere instead of silently
+  // misbehaving (NaN trust proxy, wrong-chain signing).
+  const invalid: string[] = [];
+  try {
+    getTrustProxy();
+  } catch (err) {
+    invalid.push((err as Error).message);
+  }
+  try {
+    getStellarNetworkName();
+  } catch (err) {
+    invalid.push((err as Error).message);
+  }
+
+  if (invalid.length > 0) {
+    const msg = `STARTUP CONFIGURATION: Invalid environment variables: ${invalid.join("; ")}.`;
     log("warn", msg);
     if (process.env.NODE_ENV === "production") {
       throw new Error(msg);
@@ -193,4 +243,67 @@ export function getAllowedOrigins(): string[] {
   }
 
   return [...set];
+}
+
+/**
+ * How many reverse-proxy hops Express should trust when working out the real
+ * client IP (#439). Accepts the forms Express understands: a hop count
+ * ("1" on Railway), a boolean ("true" trusts every proxy, "false" trusts
+ * none), or a comma-separated list of trusted IPs / CIDR ranges
+ * ("10.0.0.0/8, 192.168.0.0/16").
+ *
+ * Anything else is a configuration error, not a value to coerce: the old
+ * `Number(process.env.TRUST_PROXY)` turned a typo like "abc" into NaN and
+ * handed that to Express, silently breaking req.ip and the per-IP rate
+ * limits. Unset keeps Express's default.
+ */
+export type TrustProxySetting = number | boolean | string[];
+
+function isValidIpv4(value: string): boolean {
+  const parts = value.split(".");
+  if (parts.length !== 4) return false;
+  return parts.every((part) => /^\d+$/.test(part) && Number(part) >= 0 && Number(part) <= 255);
+}
+
+export function getTrustProxy(): TrustProxySetting | undefined {
+  const raw = process.env.TRUST_PROXY?.trim();
+  if (!raw) return undefined;
+
+  const lowered = raw.toLowerCase();
+  if (lowered === "true") return true;
+  if (lowered === "false") return false;
+
+  if (/^\d+$/.test(raw)) {
+    const hops = Number(raw);
+    if (!Number.isSafeInteger(hops)) {
+      throw new Error(`TRUST_PROXY must be a number, boolean or CIDR list, got "${raw}"`);
+    }
+    return hops;
+  }
+
+  const entries = raw
+    .split(",")
+    .map((entry) => entry.trim())
+    .filter(Boolean);
+  if (entries.length === 0) {
+    throw new Error(`TRUST_PROXY must be a number, boolean or CIDR list, got "${raw}"`);
+  }
+
+  for (const entry of entries) {
+    const [ip, prefix] = entry.split("/");
+    if (!isValidIpv4(ip)) {
+      throw new Error(
+        `TRUST_PROXY entry "${entry}" is not a valid IP or CIDR range: expected an IPv4 address with an optional /prefix`
+      );
+    }
+    if (prefix !== undefined) {
+      if (!/^\d+$/.test(prefix) || Number(prefix) < 0 || Number(prefix) > 32) {
+        throw new Error(
+          `TRUST_PROXY entry "${entry}" has an invalid CIDR prefix: expected 0-32`
+        );
+      }
+    }
+  }
+
+  return entries;
 }
