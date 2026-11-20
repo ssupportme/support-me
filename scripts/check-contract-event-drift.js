@@ -36,7 +36,7 @@ const DOC_FILE = "docs/architecture/contract-events.md";
  */
 function parseRustEventStructs(source) {
   const events = new Map();
-  const lines = source.split("\n");
+  const lines = source.split(/\r?\n/);
 
   for (let i = 0; i < lines.length; i++) {
     if (!/^#\[contractevent/.test(lines[i].trim())) continue;
@@ -71,7 +71,7 @@ function parseRustEventStructs(source) {
  */
 function parseDocEventStructs(markdown) {
   const events = new Map();
-  const codeBlockPattern = /```rust\n([\s\S]*?)```/g;
+  const codeBlockPattern = /```rust\r?\n([\s\S]*?)```/g;
 
   let match;
   while ((match = codeBlockPattern.exec(markdown)) !== null) {
