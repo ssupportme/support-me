@@ -50,10 +50,13 @@ function SubscriptionsList() {
       setLoading(false);
       return;
     }
-    if (!token) return;
+
+    const headers: Record<string, string> = {};
+    if (token) headers['Authorization'] = `Bearer ${token}`;
 
     fetchWithRetry(`${API_URL}/api/subscriptions?supporterAddress=${encodeURIComponent(user.walletAddress)}`, {
-      headers: { Authorization: `Bearer ${token}` },
+      credentials: 'include',
+      headers,
     })
       .then((res) => {
         if (res.status === 401) {
@@ -89,9 +92,12 @@ function SubscriptionsList() {
       // The on-chain cancel (which also revokes the allowance) is what stops
       // charges; this call only updates our records, so a failure here is a
       // warning rather than an error.
+      const cancelHeaders: Record<string, string> = {};
+      if (token) cancelHeaders['Authorization'] = `Bearer ${token}`;
       const recordRes = await fetchWithRetry(`${API_URL}/api/subscriptions/${subscription.id}/cancel`, {
         method: 'POST',
-        headers: { Authorization: `Bearer ${token}` },
+        credentials: 'include',
+        headers: cancelHeaders,
       }).catch(() => null);
 
       setSubscriptions((prev) =>
@@ -122,9 +128,12 @@ function SubscriptionsList() {
 
   const handleRemoveStaleRecord = async (subscription: Subscription) => {
     try {
+      const removeHeaders: Record<string, string> = {};
+      if (token) removeHeaders['Authorization'] = `Bearer ${token}`;
       const recordRes = await fetchWithRetry(`${API_URL}/api/subscriptions/${subscription.id}/cancel`, {
         method: 'POST',
-        headers: { Authorization: `Bearer ${token}` },
+        credentials: 'include',
+        headers: removeHeaders,
       });
       if (recordRes?.ok) {
         setSubscriptions((prev) => prev.filter((s) => s.id !== subscription.id));
