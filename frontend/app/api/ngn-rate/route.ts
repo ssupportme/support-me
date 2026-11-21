@@ -4,7 +4,7 @@ export const revalidate = 60;
 
 export async function GET() {
   const key = process.env.COINGECKO_API_KEY;
-  const url = 'https://api.coingecko.com/api/v3/simple/price?ids=tether&vs_currencies=ngn';
+  const url = 'https://api.coingecko.com/api/v3/simple/price?ids=tether&vs_currencies=ngn&include_last_updated_at=true';
 
   try {
     const res = await fetch(url, {
@@ -18,8 +18,11 @@ export async function GET() {
     if (res.ok) {
       const json = await res.json();
       const ngnPerUsdt = json?.tether?.ngn;
+      const lastUpdatedAt = json?.tether?.last_updated_at;
+      const timestamp =
+        typeof lastUpdatedAt === 'number' ? lastUpdatedAt * 1000 : Date.now();
       if (ngnPerUsdt != null && typeof ngnPerUsdt === 'number') {
-        return NextResponse.json({ rate: ngnPerUsdt, source: 'coingecko', timestamp: Date.now() });
+        return NextResponse.json({ rate: ngnPerUsdt, source: 'coingecko', timestamp });
       }
     }
   } catch {

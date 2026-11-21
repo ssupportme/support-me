@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor, fireEvent } from '@testing-library/react';
 import ActivityPage from '@/app/activity/page';
 
 vi.mock('next/link', () => ({
@@ -14,8 +14,6 @@ vi.mock('next/navigation', () => ({
   usePathname: () => '/activity',
 }));
 
-// AppNav renders WalletMenu, which pulls in wallet/kit internals we don't need
-// under test. Stub it to a marker so the nav renders without that machinery.
 vi.mock('@/components/AppNav', () => ({
   AppNav: () => <nav data-testid="app-nav" />,
 }));
@@ -33,7 +31,7 @@ const emptyOverview = {
 const populatedOverview = {
   totalSignups: 2,
   totalCreators: 1,
-  earningsByCurrency: { XLM: 42 },
+  earningsByCurrency: { XLM: 42, USDC: 10 },
 };
 
 describe('ActivityPage', () => {
@@ -61,7 +59,6 @@ describe('ActivityPage', () => {
 
     await waitFor(() => expect(screen.getByText('No activity yet')).toBeInTheDocument());
 
-    // No zeroed stat cards — just the encouraging copy and CTA.
     expect(screen.queryByText('Sign-ups')).not.toBeInTheDocument();
 
     const cta = screen.getByRole('link', { name: /create your page/i });
@@ -94,11 +91,52 @@ describe('ActivityPage', () => {
     expect(screen.queryByText('No activity yet')).not.toBeInTheDocument();
   });
 
+  it('renders only error state with Retry and no zero cards on fetch failure (#454)', async () => {
+    vi.mocked(fetch).mockResolvedValue(jsonResponse({ error: 'Failed to load activity overview' }, false, 500));
+
+    render(<ActivityPage />);
+
+    await waitFor(() => expect(screen.getByText('Failed to load activity overview')).toBeInTheDocument());
+
+    // No zeroed stat cards or empty state rendered
+    expect(screen.queryByText('Sign-ups')).not.toBeInTheDocument();
+    expect(screen.queryByText('Creators')).not.toBeInTheDocument();
+    expect(screen.queryByText('Total Creator earnings')).not.toBeInTheDocument();
+    expect(screen.queryByText('No activity yet')).not.toBeInTheDocument();
+
+    const retryBtn = screen.getByRole('button', { name: /retry/i });
+    expect(retryBtn).toBeInTheDocument();
+
+    // Clicking retry refetches
+    vi.mocked(fetch).mockResolvedValue(jsonResponse(populatedOverview));
+    fireEvent.click(retryBtn);
+
+    await waitFor(() => expect(screen.getByText('Sign-ups')).toBeInTheDocument());
+  });
+
+  it('exposes aria-pressed state on currency toggle buttons (#454)', async () => {
+    vi.mocked(fetch).mockResolvedValue(jsonResponse(populatedOverview));
+
+    render(<ActivityPage />);
+
+    await waitFor(() => expect(screen.getByText('Sign-ups')).toBeInTheDocument());
+
+    const xlmButton = screen.getByRole('button', { name: 'XLM' });
+    const usdcButton = screen.getByRole('button', { name: 'USDC' });
+
+    expect(xlmButton).toHaveAttribute('aria-pressed', 'true');
+    expect(usdcButton).toHaveAttribute('aria-pressed', 'false');
+
+    fireEvent.click(usdcButton);
+
+    expect(xlmButton).toHaveAttribute('aria-pressed', 'false');
+    expect(usdcButton).toHaveAttribute('aria-pressed', 'true');
+  });
+
   it('never renders per-user rows, names, wallets or earnings, even if the API returns them', async () => {
     vi.mocked(fetch).mockResolvedValue(
       jsonResponse({
         ...populatedOverview,
-        // A stale or misbehaving API must not make the page expose people.
         users: [
           {
             id: 1,

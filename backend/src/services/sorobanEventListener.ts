@@ -224,6 +224,8 @@ export class SorobanEventListener {
 
     switch (eventType) {
       case "donated": {
+        const donor = topics[1] as string;
+        const creator = topics[2] as string;
         const value = decodeScVal(evt.value) as {
           amount: bigint;
           memo?: string;
@@ -233,6 +235,10 @@ export class SorobanEventListener {
           fee_amount?: bigint;
           subscription_id?: bigint | number | null;
         };
+
+        const currency = resolveTokenCurrency(
+          value.token ? String(value.token) : undefined
+        );
 
         const donationId =
           value.donation_id != null ? Number(value.donation_id) : undefined;

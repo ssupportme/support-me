@@ -1,13 +1,19 @@
 import { Asset, Keypair, Networks } from "@stellar/stellar-sdk";
-import { resolveTokenCurrency, resetAssetMappingCache } from "../../lib/stellarAssets";
+import * as Sentry from "@sentry/node";
+import { resolveTokenCurrency, resetAssetMappingCache, validateAssetConfig } from "../../lib/stellarAssets";
 
 const ORIGINAL_ENV = { ...process.env };
 // A valid StrKey issuer — the SDK rejects a checksum-invalid address.
 const ISSUER = Keypair.random().publicKey();
 
+vi.mock("@sentry/node", () => ({
+  captureMessage: vi.fn(),
+}));
+
 afterEach(() => {
   process.env = { ...ORIGINAL_ENV };
   resetAssetMappingCache();
+  vi.clearAllMocks();
 });
 
 describe("resolveTokenCurrency", () => {
@@ -49,8 +55,33 @@ describe("resolveTokenCurrency", () => {
     );
   });
 
-  it("falls back to the raw token for an unrecognized asset", () => {
+  it("falls back to the raw token and captures warning to Sentry for an unrecognized asset (#441)", () => {
     resetAssetMappingCache();
     expect(resolveTokenCurrency("CUNKNOWN")).toBe("CUNKNOWN");
+    expect(Sentry.captureMessage).toHaveBeenCalledWith(
+      expect.stringContaining("CUNKNOWN"),
+      "warning"
+    );
+  });
+});
+
+describe("validateAssetConfig (#441)", () => {
+  it("returns warnings when USDC or USDT env mappings are missing", () => {
+    delete process.env.SOROBAN_USDC_ISSUER;
+    delete process.env.SOROBAN_USDC_TOKEN_ID;
+    delete process.env.SOROBAN_USDT_ISSUER;
+    delete process.env.SOROBAN_USDT_TOKEN_ID;
+
+    const warnings = validateAssetConfig();
+    expect(warnings.some((w) => w.includes("USDC"))).toBe(true);
+    expect(warnings.some((w) => w.includes("USDT"))).toBe(true);
+  });
+
+  it("returns no warning when credit assets have token ID or issuer configured", () => {
+    process.env.SOROBAN_USDC_TOKEN_ID = "C".padEnd(56, "A");
+    process.env.SOROBAN_USDT_ISSUER = ISSUER;
+
+    const warnings = validateAssetConfig();
+    expect(warnings).toHaveLength(0);
   });
 });

@@ -8,6 +8,7 @@ import {
 } from "./sorobanRpc";
 import { contractInstanceExists } from "./sorobanContracts";
 import { getNetworkPassphrase, getStellarNetworkName } from "./stellarNetwork";
+import { validateAssetConfig } from "../lib/stellarAssets";
 
 /**
  * Boot-time validation of the Stellar configuration (#281).
@@ -19,6 +20,7 @@ import { getNetworkPassphrase, getStellarNetworkName } from "./stellarNetwork";
  *      (usually the contracts were redeployed — the trigger for #278 resets).
  *   3. An EXECUTOR_SECRET_KEY that is not a parseable Stellar secret.
  *   4. A creator-registry contract ID that does not exist.
+ *   5. Missing USDC/USDT asset mapping env vars (#441).
  *
  * Every check is injectable so tests can drive matching, mismatched and
  * missing-contract scenarios without touching the network.
@@ -144,6 +146,12 @@ export async function validateStellarSetup(
     } catch {
       problems.push("EXECUTOR_SECRET_KEY is not a valid Stellar secret key");
     }
+  }
+
+  // 4. Asset mapping validation (#441): warn if credit asset mappings are not configured
+  const assetWarnings = validateAssetConfig();
+  for (const w of assetWarnings) {
+    warnings.push(w);
   }
 
   const summary: StellarSetupSummary = {

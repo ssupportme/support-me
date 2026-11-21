@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo, useCallback } from 'react';
 import Link from 'next/link';
 import { AppNav } from '@/components/AppNav';
 import { ActivitySkeleton } from '@/components/ActivitySkeleton';
@@ -20,14 +20,18 @@ export default function ActivityPage() {
   const [error, setError] = useState('');
   const [earningsCurrency, setEarningsCurrency] = useState<string | null>(null);
 
-  const currencies = data
-    ? Object.keys(data.earningsByCurrency).sort((a, b) => {
-        const order = ['XLM', 'USDC'];
-        const ia = order.indexOf(a);
-        const ib = order.indexOf(b);
-        return (ia === -1 ? 99 : ia) - (ib === -1 ? 99 : ib);
-      })
-    : [];
+  const currencies = useMemo(
+    () =>
+      data
+        ? Object.keys(data.earningsByCurrency).sort((a, b) => {
+            const order = ['XLM', 'USDC'];
+            const ia = order.indexOf(a);
+            const ib = order.indexOf(b);
+            return (ia === -1 ? 99 : ia) - (ib === -1 ? 99 : ib);
+          })
+        : [],
+    [data]
+  );
 
   useEffect(() => {
     if (currencies.length > 0 && (!earningsCurrency || !currencies.includes(earningsCurrency))) {
@@ -35,24 +39,26 @@ export default function ActivityPage() {
     }
   }, [currencies, earningsCurrency]);
 
-  useEffect(() => {
-    const fetchOverview = async () => {
-      setLoading(true);
-      try {
-        const res = await fetch(`${API_URL}/api/activity/overview`);
-        if (!res.ok) {
-          const body = await res.json().catch(() => ({}));
-          throw new Error(body.error || 'Failed to load activity overview');
-        }
-        setData(await res.json());
-      } catch (err) {
-        setError((err as Error).message);
-      } finally {
-        setLoading(false);
+  const fetchOverview = useCallback(async () => {
+    setLoading(true);
+    setError('');
+    try {
+      const res = await fetch(`${API_URL}/api/activity/overview`);
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        throw new Error(body.error || 'Failed to load activity overview');
       }
-    };
-    fetchOverview();
+      setData(await res.json());
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setLoading(false);
+    }
   }, []);
+
+  useEffect(() => {
+    fetchOverview();
+  }, [fetchOverview]);
 
   if (loading) {
     return <ActivitySkeleton />;
@@ -74,11 +80,22 @@ export default function ActivityPage() {
           individual names, wallet addresses and earnings are never listed here.
         </p>
 
-        {error && (
+        {error && !data ? (
+          <div className="card-brutal bg-brand-pink p-6 mb-6 text-ink">
+            <p className="font-bold mb-3">{error}</p>
+            <button
+              type="button"
+              onClick={fetchOverview}
+              className="btn-brutal btn-brutal-white text-sm font-bold px-4 py-2"
+            >
+              Retry
+            </button>
+          </div>
+        ) : error ? (
           <div className="card-brutal bg-brand-pink p-4 mb-6 text-ink font-bold">{error}</div>
-        )}
+        ) : null}
 
-        {isEmpty ? (
+        {data === null ? null : isEmpty ? (
           <div className="card-brutal bg-card p-10 text-center">
             <h2 className="text-2xl font-extrabold text-ink mb-2">No activity yet</h2>
             <p className="text-muted font-medium mb-6 max-w-md mx-auto">
@@ -117,6 +134,7 @@ export default function ActivityPage() {
                         <button
                           key={currency}
                           type="button"
+                          aria-pressed={earningsCurrency === currency}
                           onClick={() => setEarningsCurrency(currency)}
                           className={`px-2.5 py-1 text-xs font-bold transition-colors ${
                             earningsCurrency === currency
