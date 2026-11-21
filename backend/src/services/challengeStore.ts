@@ -28,7 +28,9 @@ export class ChallengeStore {
   constructor(
     private readonly maxEntries = DEFAULT_MAX_ENTRIES,
     private readonly sweepIntervalMs = DEFAULT_SWEEP_INTERVAL_MS
-  ) {}
+  ) {
+    this.startSweeping();
+  }
 
   set(walletAddress: string, challenge: StoredChallenge): void {
     const previousId = this.walletToChallengeId.get(walletAddress);

@@ -5,13 +5,37 @@ import { AppError } from "../errors/AppError";
 import { log } from "../lib/logger";
 import * as Sentry from "@sentry/node";
 
+// Shape of errors raised when an upstream provider (e.g. Twitter) fails.
+// Matched structurally so this handler does not depend on a specific class
+// export path; the provider response body is never forwarded to the client.
+interface UpstreamErrorLike {
+  name: string;
+  provider: string;
+  upstreamStatus?: number;
+  timedOut?: boolean;
+}
+
 interface BodyParserError {
   type: string;
   status: number;
 }
 
+function isUpstreamError(err: unknown): err is UpstreamErrorLike {
+  return (
+    typeof err === "object" &&
+    err !== null &&
+    (err as { name?: unknown }).name === "UpstreamError" &&
+    typeof (err as { provider?: unknown }).provider === "string"
+  );
+}
+
 function isBodyParserError(err: unknown): err is BodyParserError {
-  return typeof err === "object" && err !== null && "type" in err && "status" in err;
+  return (
+    typeof err === "object" &&
+    err !== null &&
+    "type" in (err as Record<string, unknown>) &&
+    "status" in (err as Record<string, unknown>)
+  );
 }
 
 // Adds the request's id to a response payload so a failed request can be
@@ -48,6 +72,21 @@ export function errorHandler(
 ) {
   if (err instanceof AppError) {
     return res.status(err.statusCode).json(withRequestId(req, { error: err.message, code: err.code }));
+  }
+
+  // Upstream provider failures (e.g. Twitter) are reported with a fixed,
+  // generic message. The provider's response body is never forwarded to the
+  // client; it is only logged server-side.
+  if (isUpstreamError(err)) {
+    log("warn", "upstream provider error", {
+      requestId: req.requestId,
+      provider: err.provider,
+      upstreamStatus: err.upstreamStatus,
+      timedOut: err.timedOut,
+    });
+    return res.status(502).json(
+      withRequestId(req, { error: "Upstream provider unavailable", code: "UPSTREAM_ERROR" })
+    );
   }
 
   // express.json() rejects an unparseable body before any route schema runs;

@@ -1,4 +1,17 @@
 import { randomBytes, createHash } from "crypto";
+import { UnauthorizedError } from "../errors/AppError";
+import { AppError } from "../errors/AppError";
+
+/**
+ * Upstream provider failure. Carries server-side details only; the message
+ * returned to clients never includes the provider's response body.
+ */
+export class UpstreamError extends AppError {
+  constructor(message: string, public readonly details?: Record<string, unknown>) {
+    super(message, 502, "UPSTREAM_ERROR");
+    this.name = "UpstreamError";
+  }
+}
 
 /**
  * Twitter/X OAuth 2.0 (Authorization Code + PKCE) integration (#14). Kept
@@ -11,6 +24,11 @@ import { randomBytes, createHash } from "crypto";
 const AUTHORIZE_URL = "https://twitter.com/i/oauth2/authorize";
 const TOKEN_URL = "https://api.twitter.com/2/oauth2/token";
 const PROFILE_URL = "https://api.twitter.com/2/users/me";
+
+const PROVIDER = "twitter";
+
+/** Hard cap on any single Twitter API call so a hung provider fails fast. */
+export const TWITTER_FETCH_TIMEOUT_MS = 10_000;
 
 export interface TwitterOAuthConfig {
   clientId: string;
@@ -63,6 +81,38 @@ export interface TwitterTokenResponse {
   refreshToken?: string;
 }
 
+/**
+ * Wraps a Twitter request so that a timeout or network failure becomes an
+ * UpstreamError (502) and a provider HTTP error never leaks its response body
+ * to the client. The upstream status is recorded for server-side logging only.
+ */
+async function callTwitter(url: string, init: RequestInit, failureLabel: string): Promise<Response> {
+  let response: Response;
+  try {
+    response = await fetch(url, {
+      ...init,
+      signal: AbortSignal.timeout(TWITTER_FETCH_TIMEOUT_MS),
+    });
+  } catch (err) {
+    const timedOut =
+      err instanceof Error && (err.name === "TimeoutError" || err.name === "AbortError");
+    throw new UpstreamError(`${failureLabel}: provider unavailable`, {
+      provider: PROVIDER,
+      timedOut,
+    });
+  }
+  if (response.status === 401 || response.status === 403) {
+    throw new UnauthorizedError(`${failureLabel}: rejected by provider`);
+  }
+  if (!response.ok) {
+    throw new UpstreamError(`${failureLabel}: provider error`, {
+      provider: PROVIDER,
+      upstreamStatus: response.status,
+    });
+  }
+  return response;
+}
+
 export async function exchangeCodeForToken(
   config: TwitterOAuthConfig,
   code: string,
@@ -70,26 +120,29 @@ export async function exchangeCodeForToken(
 ): Promise<TwitterTokenResponse> {
   const basicAuth = Buffer.from(`${config.clientId}:${config.clientSecret}`).toString("base64");
 
-  const response = await fetch(TOKEN_URL, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/x-www-form-urlencoded",
-      Authorization: `Basic ${basicAuth}`,
+  const response = await callTwitter(
+    TOKEN_URL,
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/x-www-form-urlencoded",
+        Authorization: `Basic ${basicAuth}`,
+      },
+      body: new URLSearchParams({
+        grant_type: "authorization_code",
+        code,
+        redirect_uri: config.redirectUri,
+        code_verifier: codeVerifier,
+      }),
     },
-    body: new URLSearchParams({
-      grant_type: "authorization_code",
-      code,
-      redirect_uri: config.redirectUri,
-      code_verifier: codeVerifier,
-    }),
-  });
+    "Twitter token exchange failed"
+  );
 
-  if (!response.ok) {
-    const body = await response.text().catch(() => "");
-    throw new Error(`Twitter token exchange failed (${response.status}): ${body}`);
-  }
-
-  const data = (await response.json()) as { access_token: string; refresh_token?: string };
+  const data = (await response.json().catch(() => {
+    throw new UpstreamError("Twitter token exchange failed: malformed response", {
+      provider: PROVIDER,
+    });
+  })) as { access_token: string; refresh_token?: string };
   return { accessToken: data.access_token, refreshToken: data.refresh_token };
 }
 
@@ -100,15 +153,16 @@ export interface TwitterProfile {
 }
 
 export async function fetchTwitterProfile(accessToken: string): Promise<TwitterProfile> {
-  const response = await fetch(`${PROFILE_URL}?user.fields=username,name`, {
-    headers: { Authorization: `Bearer ${accessToken}` },
-  });
+  const response = await callTwitter(
+    `${PROFILE_URL}?user.fields=username,name`,
+    { headers: { Authorization: `Bearer ${accessToken}` } },
+    "Twitter profile fetch failed"
+  );
 
-  if (!response.ok) {
-    const body = await response.text().catch(() => "");
-    throw new Error(`Twitter profile fetch failed (${response.status}): ${body}`);
-  }
-
-  const data = (await response.json()) as { data: { id: string; username: string; name: string } };
+  const data = (await response.json().catch(() => {
+    throw new UpstreamError("Twitter profile fetch failed: malformed response", {
+      provider: PROVIDER,
+    });
+  })) as { data: { id: string; username: string; name: string } };
   return { id: data.data.id, username: data.data.username, name: data.data.name };
 }

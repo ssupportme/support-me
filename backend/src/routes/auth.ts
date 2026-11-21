@@ -86,6 +86,12 @@ export const magicLinkEmailLimiter = new RateLimiter(
   rateLimits.magicLink.windowMs
 );
 magicLinkEmailLimiter.startSweeping();
+// Twitter OAuth endpoints are unauthenticated and each start call allocates a
+// pending-state entry, so both are limited per IP.
+export const twitterStartIpLimiter = new RateLimiter(rateLimits.auth.ipMax, rateLimits.auth.windowMs);
+twitterStartIpLimiter.startSweeping();
+export const twitterCallbackIpLimiter = new RateLimiter(rateLimits.auth.ipMax, rateLimits.auth.windowMs);
+twitterCallbackIpLimiter.startSweeping();
 
 router.post(
   '/challenge',
@@ -220,6 +226,7 @@ router.post(
 // /twitter/callback once Twitter redirects back with a code.
 router.get(
   '/twitter',
+  rateLimit(twitterStartIpLimiter, clientIp, 'Twitter sign-in'),
   asyncHandler(async (req, res) => {
     const redirectUrl = startTwitterAuth();
     return res.json({ redirectUrl });
@@ -228,6 +235,7 @@ router.get(
 
 router.get(
   '/twitter/callback',
+  rateLimit(twitterCallbackIpLimiter, clientIp, 'Twitter sign-in'),
   validate({ query: twitterCallbackSchema }),
   asyncHandler(async (req, res) => {
     const { code, state } = req.query as unknown as { code: string; state: string };
