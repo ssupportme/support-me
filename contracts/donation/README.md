@@ -9,26 +9,32 @@ The `DonationContract` enables creators to register public profiles and receive 
 ## Key Features
 
 - **Creator Registration**: Creators can register profiles with usernames
-- **Donation Tracking**: Donations are recorded with donor, amount, memo, and timestamp
-- **Creator Statistics**: Track total donations and donation count per creator
+- **Donation Tracking**: Donations are recorded with donor, creator, amount, fee amount, memo, and timestamp
+- **Creator Profiles**: Total donations and donation count are stored on each creator's profile
 - **Event Logging**: All actions emit events for monitoring and indexing
 - **Auth Integration**: Uses Soroban's native auth for secure operations
+- **Recurring Donations**: Supporters can subscribe to a creator; an executor charges each interval against a token allowance
+- **Multi-token Donations**: Donations are made in an allowlisted token
 
 ## Contract Structure
 
 ### Data Types
 
 #### `DonationRecord`
-Records individual donations:
+Records one donation (a one-off `donate` or a subscription charge). `amount` is the
+gross amount the donor sent; the creator receives `amount - fee_amount` and the
+platform fee address receives `fee_amount`.
 ```rust
 pub struct DonationRecord {
-    pub donor: Address,           // Who sent the donation
-    pub creator: Address,         // Who received it
-    pub amount: i128,            // Donation amount (in stroops)
-    pub memo: String,            // Optional message
-    pub timestamp: u64,          // When it happened
+    pub donor: Address,
+    pub creator: Address,
+    pub amount: i128,
+    pub fee_amount: i128,
+    pub memo: String,
+    pub timestamp: u64,
 }
 ```
+
 
 #### `CreatorProfile`
 Creator account information:
@@ -41,123 +47,101 @@ pub struct CreatorProfile {
     pub created_at: u64,         // Registration timestamp
 }
 ```
+#### `Subscription`
+A recurring donation. The supporter grants the donation contract a token allowance
+(via the token contract's `approve`) covering `amount` per `interval_secs`; the
+contract draws on it once per interval, on or after `next_charge_at`.
+```rust
+pub struct Subscription {
+    pub supporter: Address,
+    pub creator: Address,
+    pub token: Address,
+    pub amount: i128,
+    pub interval_secs: u64,
+    pub next_charge_at: u64,
+    pub active: bool,
+}
+```
+`AdminAction` and `AdminProposal` (used by the multi-sig functions) are also defined
+in the `common` crate.
 
 ### Methods
 
-#### `register_creator(env, creator, username) -> CreatorProfile`
-Register a new creator profile.
+#### Creators
+| Method | Returns |
+|---|---|
+| `register_creator(env, creator: Address, username: String)` | `CreatorProfile` |
+| `get_creator(env, creator: Address)` | `Option<CreatorProfile>` |
 
-**Parameters:**
-- `creator`: Creator's address (must sign transaction)
-- `username`: Unique username for the creator: 1-32 bytes of `a-z`, `0-9`, `_`
-  or `-`. The registry rejects empty, oversized, invalid and already-taken
-  usernames with distinct `RegistryError`s (`EmptyUsername`,
-  `UsernameTooLong`, `InvalidUsernameChars`, `UsernameTaken`).
+#### Donations
+| Method | Returns |
+|---|---|
+| `donate(env, donor: Address, creator: Address, token: Address, amount: i128, memo: String)` | `DonationRecord` |
+| `get_donation(env, index: u32)` | `Option<DonationRecord>` |
+| `get_total_donations_count(env)` | `u32` |
 
-**Returns:** `CreatorProfile` object
+`donate` requires the donor's authorization and fails with `DonationError::Paused`
+while the contract is paused.
 
-**Events:** Emits `created` event
+#### Subscriptions
+| Method | Returns |
+|---|---|
+| `subscribe(env, supporter: Address, creator: Address, token: Address, amount: i128, interval_secs: u64)` | `u64` (subscription id) |
+| `charge_subscription(env, executor: Address, subscription_id: u64)` | `Result<DonationRecord, ChargeError>` |
+| `cancel_subscription(env, supporter: Address, subscription_id: u64)` | none |
+| `get_subscription(env, subscription_id: u64)` | `Option<Subscription>` |
+| `get_committed_amount(env, supporter: Address, token: Address)` | `i128` |
+| `bump_subscription(env, subscription_id: u64)` | none |
 
-**Example:**
-```rust
-DonationContract::register_creator(
-    env.clone(),
-    creator_address,
-    String::from_bytes(&env, b"awesome_dev")
-);
-```
+#### Goals
+| Method | Returns |
+|---|---|
+| `set_goal(env, creator: Address, goal_amount: i128)` | none |
+| `get_goal(env, creator: Address)` | `Option<i128>` |
 
-#### `donate(env, donor, creator, amount, memo) -> DonationRecord`
-Send a donation to a creator.
+#### Configuration and admin
+| Method | Returns |
+|---|---|
+| `initialize(env, admin: Address, registry: Address)` | none |
+| `initialize_multisig(env, admins: Vec<Address>, threshold: u32, timelock_delay: u64, registry: Address)` | none |
+| `bump(env)` | none |
+| `is_admin(env, address: Address)` | `bool` |
+| `is_paused(env)` | `bool` |
+| `emergency_pause(env, admin: Address)` | none |
+| `set_executor(env, executor: Address)` | none |
+| `add_allowed_token(env, token: Address)` | none |
+| `remove_allowed_token(env, token: Address)` | none |
+| `is_token_allowed(env, token: Address)` | `bool` |
+| `set_min_donation(env, min_amount: i128)` | none |
+| `get_min_donation(env)` | `i128` |
+| `set_max_donation(env, max_amount: i128)` | none |
+| `get_max_donation(env)` | `i128` |
 
-**Parameters:**
-- `donor`: Donor's address (must sign transaction)
-- `creator`: Target creator's address
-- `amount`: Donation amount in stroops (must be > 0)
-- `memo`: Optional message with the donation
-
-**Returns:** `DonationRecord` object
-
-**Events:** Emits `donated` event
-
-**Example:**
-```rust
-DonationContract::donate(
-    env.clone(),
-    donor_address,
-    creator_address,
-    5000,  // stroops (0.0005 XLM)
-    String::from_bytes(&env, b"Great work!")
-);
-```
-
-#### `get_creator(env, creator) -> Option<CreatorProfile>`
-Retrieve a creator's profile.
-
-**Parameters:**
-- `creator`: Creator's address
-
-**Returns:** `Option<CreatorProfile>` - Some if creator exists, None otherwise
-
-#### `get_creator_stats(env, creator) -> Option<CreatorProfile>`
-Get donation statistics for a creator.
-
-**Parameters:**
-- `creator`: Creator's address
-
-**Returns:** Complete `CreatorProfile` with stats
-
-#### `get_total_donations_count(env) -> u32`
-Get approximate total donation count across all creators.
-
-**Returns:** Approximate number of donations made
-
-#### `verify_donation(env, donor, creator, amount) -> bool`
-Verify if a donor has made donations to a creator.
-
-**Parameters:**
-- `donor`: Donor's address (must sign)
-- `creator`: Creator's address
-- `amount`: Minimum amount to verify
-
-**Returns:** `bool` - true if donation history exists
+#### Multi-sig proposals
+| Method | Returns |
+|---|---|
+| `propose_admin_action(env, proposer: Address, action: AdminAction)` | `u64` (proposal id) |
+| `approve_admin_action(env, admin: Address, proposal_id: u64)` | none |
+| `cancel_admin_action(env, caller: Address, proposal_id: u64)` | none |
+| `execute_admin_action(env, executor: Address, proposal_id: u64)` | none |
+| `get_proposal(env, proposal_id: u64)` | `Option<AdminProposal>` |
 
 ## Usage Flow
 
 ### For Creators
 
-1. **Register Profile:**
-   ```
-   Call register_creator with your address and desired username
-   ```
-
-2. **Check Stats:**
-   ```
-   Call get_creator_stats to see total donations and count
-   ```
-
-3. **Share Profile:**
-   ```
-   Share your creator address or username with supporters
-   ```
+1. Register a profile with `register_creator(creator, username)`.
+2. Read your profile and totals with `get_creator(creator)`.
+3. Optionally set a donation goal with `set_goal`.
+4. Share your creator address or username with supporters.
 
 ### For Supporters
 
-1. **Find Creator:**
-   ```
-   Look up creator's address
-   ```
-
-2. **Send Donation:**
-   ```
-   Call donate with creator address and amount
-   Add optional memo message
-   ```
-
-3. **Verify:**
-   ```
-   Call verify_donation to confirm transaction
-   ```
+1. Look up the creator's address (`get_creator` confirms they are registered).
+2. Send a one-off donation with `donate(donor, creator, token, amount, memo)`, or
+   approve an allowance on the token and call `subscribe(...)` for a recurring one.
+3. Read back a record with `get_donation(index)` or a subscription with
+   `get_subscription(subscription_id)`.
 
 ## Storage Model
 
@@ -167,87 +151,92 @@ Verify if a donor has made donations to a creator.
 
 ## Events
 
-### Created Event
-```
-Emitted when creator profile is created
-Data: (creator_address, username)
-```
+
 
 ### Donated Event
 ```
-Emitted when donation or subscription charge is made
+Emitted when a donation or subscription charge is made
 Data: DonatedEvent {
-    donor: Address,
-    creator: Address,
+    donor: Address,          // topic
+    creator: Address,        // topic
+    donation_id: u32,
     token: Address,
     amount: i128,
+    fee_amount: i128,
     memo: String,
     timestamp: u64,
-    donation_id: u32,
-    fee_amount: i128,
     subscription_id: Option<u64>,
 }
 ```
 
 ## Error Codes
 
-The contracts use typed, discriminant-backed errors instead of untyped panics:
+The contracts use typed, discriminant-backed errors instead of untyped panics.
+Codes are only unique within one enum.
 
 ### `ChargeError` (`contracts/donation`)
 | Code | Error Variant | Description |
 |---|---|---|
-| 1 | `InsufficientAllowance` | Spender allowance insufficient to complete subscription charge |
-| 2 | `InsufficientBalance` | Supporter balance insufficient to complete subscription charge |
+| 1 | `InsufficientAllowance` | Allowance is insufficient to complete the subscription charge |
+| 2 | `InsufficientBalance` | Supporter balance is insufficient |
+| 3 | `TokenNotAllowed` | The subscription's token was removed from the allowlist |
+| 4 | `AmountOutOfBounds` | The amount no longer satisfies the current min/max donation bounds |
 
 ### `DonationError` (`contracts/donation`)
-| Code | Error Variant | Description |
-|---|---|---|
-| 3 | `NotInitialized` | Contract has not been initialized |
-| 4 | `AlreadyInitialized` | Contract already initialized |
-| 5 | `Paused` | Contract is currently paused |
-| 6 | `Unauthorized` | Caller lacks authorization for operation |
-| 7 | `TokenNotAllowed` | Token is not in allowlist |
-| 8 | `MemoTooLong` | Memo exceeds maximum allowed length |
-| 9 | `AmountTooLow` | Donation amount is below configured minimum |
-| 10 | `AmountTooHigh` | Donation amount exceeds configured maximum |
-| 11 | `NotDue` | Subscription is not yet due for charge |
-| 12 | `SubscriptionNotActive` | Subscription is cancelled or inactive |
-| 13 | `SubscriptionNotFound` | Subscription ID does not exist |
-| 14 | `InvalidAmount` | Amount must be positive |
-| 15 | `InvalidInterval` | Interval must be positive |
-| 16 | `InvalidThreshold` | Multi-sig threshold is invalid |
-| 17 | `EmptyAdminList` | Admin list cannot be empty |
-| 18 | `ProposalNotFound` | Multi-sig proposal does not exist |
-| 19 | `ProposalAlreadyExecuted` | Multi-sig proposal already executed |
-| 20 | `AlreadyApproved` | Admin already approved proposal |
-| 21 | `TimelockNotElapsed` | Multi-sig timelock has not passed |
-| 22 | `ThresholdExceedsAdmins` | Multi-sig threshold exceeds admin count |
-| 23 | `CannotRemoveAllAdmins` | Removal would leave zero admins |
-| 24 | `MultiSigRequired` | Action requires multi-sig proposal |
-| 25 | `ExecutorNotSet` | Contract executor is not set |
-| 26 | `Overflow` | Numeric overflow or underflow |
-| 27 | `InvalidGoal` | Invalid creator goal amount |
+| Code | Error Variant |
+|---|---|
+| 3 | `NotInitialized` |
+| 4 | `AlreadyInitialized` |
+| 5 | `Paused` |
+| 6 | `Unauthorized` |
+| 7 | `TokenNotAllowed` |
+| 8 | `MemoTooLong` |
+| 10 | `AmountTooLow` |
+| 11 | `AmountTooHigh` |
+| 12 | `NotDue` |
+| 13 | `SubscriptionNotActive` |
+| 14 | `SubscriptionNotFound` |
+| 15 | `InvalidAmount` |
+| 16 | `InvalidInterval` |
+| 17 | `InvalidThreshold` |
+| 18 | `EmptyAdminList` |
+| 19 | `ProposalNotFound` |
+| 20 | `ProposalAlreadyExecuted` |
+| 21 | `AlreadyApproved` |
+| 22 | `TimelockNotElapsed` |
+| 23 | `ThresholdExceedsAdmins` |
+| 24 | `CannotRemoveAllAdmins` |
+| 25 | `MultiSigRequired` |
+| 26 | `ExecutorNotSet` |
+| 27 | `Overflow` |
+
+Code 9 is not used.
 
 ### `RegistryError` (`contracts/creator-registry`)
-| Code | Error Variant | Description |
-|---|---|---|
-| 1 | `NotInitialized` | Registry is not initialized |
-| 2 | `AlreadyInitialized` | Registry already initialized |
-| 3 | `Unauthorized` | Caller lacks authorization |
-| 4 | `AlreadyRegistered` | Creator is already registered |
-| 5 | `InvalidAmount` | Invalid amount |
-| 6 | `InvalidThreshold` | Multi-sig threshold is invalid |
-| 7 | `EmptyAdminList` | Admin list cannot be empty |
-| 8 | `ProposalNotFound` | Multi-sig proposal does not exist |
-| 9 | `ProposalAlreadyExecuted` | Multi-sig proposal already executed |
-| 10 | `AlreadyApproved` | Admin already approved proposal |
-| 11 | `TimelockNotElapsed` | Multi-sig timelock has not passed |
-| 12 | `ThresholdExceedsAdmins` | Multi-sig threshold exceeds admin count |
-| 13 | `CannotRemoveAllAdmins` | Removal would leave zero admins |
-| 14 | `MultiSigRequired` | Action requires multi-sig proposal |
-| 15 | `CallerNotAuthorized` | Caller not authorized for registry action |
-| 16 | `InvalidGoal` | Invalid goal amount |
-| 17 | `Overflow` | Arithmetic overflow |
+| Code | Error Variant |
+|---|---|
+| 1 | `NotInitialized` |
+| 2 | `AlreadyInitialized` |
+| 3 | `Unauthorized` |
+| 4 | `AlreadyRegistered` |
+| 5 | `InvalidAmount` |
+| 6 | `InvalidThreshold` |
+| 7 | `EmptyAdminList` |
+| 8 | `ProposalNotFound` |
+| 9 | `ProposalAlreadyExecuted` |
+| 10 | `AlreadyApproved` |
+| 11 | `TimelockNotElapsed` |
+| 12 | `ThresholdExceedsAdmins` |
+| 13 | `CannotRemoveAllAdmins` |
+| 14 | `MultiSigRequired` |
+| 15 | `CallerNotAuthorized` |
+| 16 | `InvalidGoal` |
+| 17 | `Overflow` |
+| 18 | `EmptyUsername` |
+| 19 | `UsernameTooLong` |
+| 20 | `InvalidUsernameChars` |
+| 21 | `UsernameTaken` |
+| 22 | `UnsupportedAction` |
 
 ## Security Considerations
 
@@ -258,35 +247,24 @@ The contracts use typed, discriminant-backed errors instead of untyped panics:
 
 ## Deployment and initialization
 
-The contract has no `initialize` entry point. It is configured by its
-constructor, which runs inside the deploy transaction, so nobody can front-run
-the deployer to claim the admin set:
+The donation contract has no `__constructor`. It is configured after deployment by
+calling `initialize(admin, registry)`, or
+`initialize_multisig(admins, threshold, timelock_delay, registry)` for a multi-admin
+setup. The executor that may call `charge_subscription` is set with `set_executor`.
 
-```rust
-pub fn __constructor(
-    env: Env,
-    admins: Vec<Address>,   // first entry is the primary admin
-    threshold: u32,         // 1..=admins.len()
-    timelock_delay: u64,    // seconds
-    registry: Address,      // CreatorRegistry contract ID
-)
-```
+The `creator-registry` contract can be configured the same way, with
+`initialize(admin, donation_contract)` or
+`initialize_multisig(...)`, or atomically at deploy time through
+`__constructor(admins, threshold, timelock_delay, donation_contract)`. The admin set
+must be non-empty and free of duplicates, and `threshold` must be between 1 and the
+number of admins.
 
-The creator-registry contract takes the same arguments, with
-`donation_contract` in place of `registry`. Since each contract needs the
-other's ID, `make deploy` derives the registry ID from a salt, deploys this
-contract with it, then deploys the registry at that salt:
-
-```bash
-make deploy SOURCE=<deployer-key-alias> ADMINS='["<ADMIN_ADDRESS>"]'
-# multi-admin:
-make deploy SOURCE=<deployer-key-alias> \
-  ADMINS='["<ADMIN_1>","<ADMIN_2>","<ADMIN_3>"]' THRESHOLD=2 TIMELOCK_DELAY=86400
-```
-
-`NETWORK` defaults to `testnet`; pass `SALT=<64 hex chars>` to reuse a recorded
-salt. See [`docs/contract-deploy-workflow.md`](../../docs/contract-deploy-workflow.md)
-for the manual CLI steps and verification.
+[`scripts/deploy-testnet.sh`](../../scripts/deploy-testnet.sh) (`make deploy-testnet`)
+builds both contracts, deploys them to testnet, calls `initialize` on each so they
+reference one another, sets the executor, and records the addresses in
+`deployments/testnet.json`. See
+[`docs/contract-deploy-workflow.md`](../../docs/contract-deploy-workflow.md) for the
+manual CLI steps and verification.
 
 ## Keeping the contract live
 
@@ -316,5 +294,4 @@ make test
 - Creator tiers and perks
 - Donation escrow with milestone-based release
 - Integration with payment channels
-- Multi-token support
 - Creator rankings and leaderboards
