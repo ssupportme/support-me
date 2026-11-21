@@ -131,29 +131,44 @@ export default function DashboardPage() {
 
   // Exports the creator's full donation history (not just the pages loaded on
   // screen) by walking every page of the API, then downloads it as a CSV.
+  // Capped at 200 pages x 100 rows (the latest 20,000 donations); the user is
+  // warned when the cap truncates the export.
   const exportDonationsCsv = async () => {
     if (!creator || !token || exporting) return;
     setExporting(true);
+    const controller = new AbortController();
+    exportAbortRef.current = controller;
+    setExportProgress(0);
     try {
       const all: Donation[] = [];
       const pageSize = 100;
       const maxPages = 200;
+      let truncated = false;
       for (let page = 1; page <= maxPages; page++) {
         const response = await fetch(
           `${API_URL}/api/donations?creatorUsername=${encodeURIComponent(creator.username)}&page=${page}&limit=${pageSize}`,
-          { headers: { Authorization: `Bearer ${token}` } }
+          { headers: { Authorization: `Bearer ${token}` }, signal: controller.signal }
         );
         if (!response.ok) throw new Error('The server returned an error. Please try again.');
         const data = await response.json();
         all.push(...((Array.isArray(data) ? data : data.items) || []));
+        setExportProgress(page);
         if (Array.isArray(data) || !data.pagination || page >= data.pagination.totalPages) break;
+        if (page === maxPages) truncated = true;
       }
       downloadCsv(donationsCsvFilename(creator.username), donationsToCsv(all));
-      notify.success(`Exported ${all.length} donation${all.length === 1 ? '' : 's'}`);
+      if (truncated) {
+        notify.error('Export truncated', `Exported the latest 20,000 donations (${all.length} rows). Older donations were not included.`);
+      } else {
+        notify.success(`Exported ${all.length} donation${all.length === 1 ? '' : 's'}`);
+      }
     } catch (err) {
+      if ((err as Error).name === 'AbortError') return;
       notify.error('Could not export donations', err);
     } finally {
+      exportAbortRef.current = null;
       setExporting(false);
+      setExportProgress(null);
     }
   };
 
