@@ -12,6 +12,8 @@ import {
 } from "./twitterOAuth";
 
 const STATE_TTL_MS = 10 * 60 * 1000;
+const STATE_MAX_ENTRIES = 10_000;
+const STATE_SWEEP_INTERVAL_MS = 60 * 1000;
 const PROVIDER = "twitter";
 
 interface PendingState {
@@ -22,15 +24,32 @@ interface PendingState {
 // Keyed by the opaque `state` param round-tripped through the redirect, the
 // same in-memory-Map-with-TTL pattern as the wallet challenge flow in
 // routes/auth.ts. Holds the PKCE verifier server-side so it's never
-// exposed to the browser or the OAuth provider.
+// exposed to the browser or the OAuth provider. Size is capped and a timer
+// sweeps expired entries, so unauthenticated /twitter calls cannot grow it
+// without bound.
 const pendingStates = new Map<string, PendingState>();
 
-function pruneExpiredStates(): void {
-  const now = Date.now();
+function pruneExpiredStates(now = Date.now()): void {
   for (const [state, entry] of pendingStates) {
-    if (entry.expiresAt < now) pendingStates.delete(state);
+    if (entry.expiresAt <= now) pendingStates.delete(state);
   }
 }
+
+let sweepTimer: NodeJS.Timeout | undefined;
+
+/** Starts the periodic sweep of expired OAuth states. Unref'd so it never holds the process open. */
+export function startTwitterStateSweeping(): void {
+  if (sweepTimer) return;
+  sweepTimer = setInterval(() => pruneExpiredStates(), STATE_SWEEP_INTERVAL_MS);
+  sweepTimer.unref();
+}
+
+export function stopTwitterStateSweeping(): void {
+  if (sweepTimer) clearInterval(sweepTimer);
+  sweepTimer = undefined;
+}
+
+startTwitterStateSweeping();
 
 /** Starts the flow: returns the URL the frontend should redirect the user to. */
 export function startTwitterAuth(): string {
@@ -39,11 +58,19 @@ export function startTwitterAuth(): string {
     throw new ServiceUnavailableError("Twitter sign-in is not configured");
   }
 
-  pruneExpiredStates();
+  const now = Date.now();
+  if (pendingStates.size >= STATE_MAX_ENTRIES) {
+    pruneExpiredStates(now);
+    // Still full of live entries: evict the oldest (Map keeps insertion order).
+    while (pendingStates.size >= STATE_MAX_ENTRIES) {
+      const oldest = pendingStates.keys().next().value as string;
+      pendingStates.delete(oldest);
+    }
+  }
 
   const state = randomBytes(16).toString("hex");
   const { verifier, challenge } = generatePkcePair();
-  pendingStates.set(state, { codeVerifier: verifier, expiresAt: Date.now() + STATE_TTL_MS });
+  pendingStates.set(state, { codeVerifier: verifier, expiresAt: now + STATE_TTL_MS });
 
   return buildAuthorizeUrl(config, state, challenge);
 }

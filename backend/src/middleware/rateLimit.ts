@@ -18,13 +18,13 @@ import { RateLimiter } from "../services/rateLimiter";
 export function rateLimit(
   limiter: RateLimiter,
   keyOf: (req: Request) => string | undefined,
-  label: string
+  label: string = "request"
 ): RequestHandler {
   return (req: Request, res: Response, next: NextFunction) => {
     const key = keyOf(req);
     if (key === undefined || limiter.attempt(key)) return next();
 
-    const retryAfter = limiter.retryAfterSeconds(key) || 1;
+    const retryAfter = Math.max(1, Math.ceil(limiter.retryAfterSeconds(key) ?? 0));
     res.set("Retry-After", String(retryAfter));
     return next(
       new TooManyRequestsError(`Too many ${label} requests, please retry in ${retryAfter} seconds`)
@@ -33,3 +33,12 @@ export function rateLimit(
 }
 
 export const clientIp = (req: Request): string => req.ip ?? "unknown";
+
+/**
+ * Convenience wrapper: limit a route per client IP. Used by the Twitter OAuth
+ * start/callback endpoints to bound abuse of the pending-state map and the
+ * upstream provider.
+ */
+export function rateLimitByIp(limiter: RateLimiter, label: string = "request"): RequestHandler {
+  return rateLimit(limiter, clientIp, label);
+}
