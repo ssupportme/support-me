@@ -10,7 +10,11 @@ export function ProtectedRoute({ children }: { children: ReactNode }) {
   const { user, loading } = useAuth();
 
   if (loading) {
-    return <TipJarLoader />;
+    return (
+      <div role="status" aria-live="polite" aria-label="Loading authentication state">
+        <TipJarLoader />
+      </div>
+    );
   }
 
   if (!user) {
@@ -19,13 +23,15 @@ export function ProtectedRoute({ children }: { children: ReactNode }) {
         <div className="absolute top-4 right-4">
           <ThemeToggle />
         </div>
-        <div className="card-brutal p-8 max-w-md w-full text-center">
-          <h1 className="text-2xl font-extrabold text-ink mb-2">Sign In</h1>
+        <main className="card-brutal p-8 max-w-md w-full text-center" aria-labelledby="protected-route-sign-in-heading">
+          <h1 id="protected-route-sign-in-heading" className="text-2xl font-extrabold text-ink mb-2">
+            Sign In
+          </h1>
           <p className="text-muted font-medium mb-6">
             Connect your Stellar wallet, sign in with Twitter, or use a magic link.
           </p>
           <AuthMethods />
-        </div>
+        </main>
       </div>
     );
   }
