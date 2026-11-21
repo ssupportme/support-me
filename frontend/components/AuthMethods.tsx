@@ -8,6 +8,8 @@ import { WalletConnectError, WalletConnectErrorData } from '@/components/WalletC
 import { categorizeWalletError } from '@/lib/walletErrors';
 import { describeTwitterAuthError, describeMagicLinkRequestError } from '@/lib/authErrors';
 
+const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
 /**
  * The three sign-in methods (#10 Twitter, #11 magic link, and the existing
  * wallet flow) side by side, sharing one error-card component
@@ -25,8 +27,8 @@ export function AuthMethods() {
   const [twitterError, setTwitterError] = useState<WalletConnectErrorData | null>(null);
 
   const [email, setEmail] = useState('');
+  const [sentToEmail, setSentToEmail] = useState<string | null>(null);
   const [sendingLink, setSendingLink] = useState(false);
-  const [linkSent, setLinkSent] = useState(false);
   const [magicLinkError, setMagicLinkError] = useState<WalletConnectErrorData | null>(null);
 
   const handleWalletConnect = async () => {
@@ -59,7 +61,7 @@ export function AuthMethods() {
   const handleMagicLinkSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     const trimmed = email.trim();
-    if (!trimmed || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmed)) {
+    if (!trimmed || !EMAIL_PATTERN.test(trimmed)) {
       setMagicLinkError({ title: 'Enter a valid email', message: 'Please enter a valid email address to continue.' });
       return;
     }
@@ -68,7 +70,9 @@ export function AuthMethods() {
     setMagicLinkError(null);
     try {
       await requestMagicLink(trimmed);
-      setLinkSent(true);
+      // Store the address that was actually submitted so the confirmation
+      // message cannot drift if the input is edited while the request is in flight.
+      setSentToEmail(trimmed);
     } catch (err) {
       setMagicLinkError(describeMagicLinkRequestError(err));
     } finally {
@@ -103,16 +107,16 @@ export function AuthMethods() {
         {connectingTwitter ? 'Redirecting...' : 'Sign in with Twitter'}
       </button>
 
-      {linkSent ? (
+      {sentToEmail !== null ? (
         <div className="card-brutal bg-brand-lime p-4 text-left" role="status">
           <p className="font-extrabold text-ink">Check your email</p>
           <p className="mt-1 text-sm font-medium text-ink/85">
-            We sent a sign-in link to <span className="font-bold">{email}</span>. It expires in 15 minutes and
+            We sent a sign-in link to <span className="font-bold">{sentToEmail}</span>. It expires in 15 minutes and
             works once.
           </p>
           <button
             type="button"
-            onClick={() => setLinkSent(false)}
+            onClick={() => setSentToEmail(null)}
             className="mt-3 text-xs font-bold text-ink underline"
           >
             Use a different email
