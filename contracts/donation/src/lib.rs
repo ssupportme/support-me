@@ -205,6 +205,12 @@ pub enum DonationError {
     MultiSigRequired = 25,
     ExecutorNotSet = 26,
     Overflow = 27,
+    /// `AddAdmin` for an address that is already an admin (a no-op).
+    AlreadyAdmin = 28,
+    /// `RemoveAdmin` for an address that is not an admin (a no-op).
+    NotAnAdmin = 29,
+    /// `SetMinDonation`/`SetMaxDonation` would violate `min <= max`.
+    InvalidDonationBounds = 30,
 }
 
 #[contractevent(topics = ["sub_failed"])]
@@ -381,6 +387,7 @@ impl DonationContract {
         if !Self::is_admin(env.clone(), proposer.clone()) {
             soroban_sdk::panic_with_error!(&env, DonationError::Unauthorized);
         }
+        Self::validate_action(&env, &action);
 
         let prop_id: u64 = env
             .storage()
@@ -598,13 +605,17 @@ impl DonationContract {
             }
             AdminAction::AddAdmin(new_admin) => {
                 let mut admins: Vec<Address> = env.storage().instance().get(&ADMINS_KEY).unwrap();
-                if !Self::contains_address(&admins, &new_admin) {
-                    admins.push_back(new_admin);
-                    env.storage().instance().set(&ADMINS_KEY, &admins);
+                if Self::contains_address(&admins, &new_admin) {
+                    soroban_sdk::panic_with_error!(&env, DonationError::AlreadyAdmin);
                 }
+                admins.push_back(new_admin);
+                env.storage().instance().set(&ADMINS_KEY, &admins);
             }
             AdminAction::RemoveAdmin(old_admin) => {
                 let admins: Vec<Address> = env.storage().instance().get(&ADMINS_KEY).unwrap();
+                if !Self::contains_address(&admins, &old_admin) {
+                    soroban_sdk::panic_with_error!(&env, DonationError::NotAnAdmin);
+                }
                 let mut new_admins = Vec::new(&env);
                 for i in 0..admins.len() {
                     let a = admins.get(i).unwrap();
@@ -1444,6 +1455,60 @@ impl DonationContract {
             .instance()
             .get(&REGISTRY_KEY)
             .expect("donation contract not initialized")
+    }
+
+    /// Validates `action` against current state at proposal time so obviously
+    /// invalid or no-op proposals fail early. Execution re-checks because
+    /// state can change between propose and execute.
+    fn validate_action(env: &Env, action: &AdminAction) {
+        let admins: Vec<Address> = match env.storage().instance().get(&ADMINS_KEY) {
+            Some(a) => a,
+            None => soroban_sdk::panic_with_error!(env, DonationError::NotInitialized),
+        };
+        match action {
+            AdminAction::AddAdmin(new_admin) => {
+                if Self::contains_address(&admins, new_admin) {
+                    soroban_sdk::panic_with_error!(env, DonationError::AlreadyAdmin);
+                }
+            }
+            AdminAction::RemoveAdmin(old_admin) => {
+                if !Self::contains_address(&admins, old_admin) {
+                    soroban_sdk::panic_with_error!(env, DonationError::NotAnAdmin);
+                }
+                let remaining = admins.len() - 1;
+                if remaining == 0 {
+                    soroban_sdk::panic_with_error!(env, DonationError::CannotRemoveAllAdmins);
+                }
+                let threshold: u32 = env.storage().instance().get(&THRESHOLD_KEY).unwrap_or(1);
+                if threshold > remaining {
+                    soroban_sdk::panic_with_error!(env, DonationError::ThresholdExceedsAdmins);
+                }
+            }
+            AdminAction::SetThreshold(new_threshold) => {
+                if *new_threshold == 0 || *new_threshold > admins.len() {
+                    soroban_sdk::panic_with_error!(env, DonationError::InvalidThreshold);
+                }
+            }
+            AdminAction::SetMinDonation(min_amount) => {
+                if *min_amount < 0 {
+                    soroban_sdk::panic_with_error!(env, DonationError::InvalidAmount);
+                }
+                let max_amount: i128 = env.storage().instance().get(&MAX_DONATION_KEY).unwrap_or(0);
+                if max_amount != 0 && *min_amount > max_amount {
+                    soroban_sdk::panic_with_error!(env, DonationError::InvalidDonationBounds);
+                }
+            }
+            AdminAction::SetMaxDonation(max_amount) => {
+                if *max_amount < 0 {
+                    soroban_sdk::panic_with_error!(env, DonationError::InvalidAmount);
+                }
+                let min_amount: i128 = env.storage().instance().get(&MIN_DONATION_KEY).unwrap_or(0);
+                if *max_amount != 0 && min_amount > *max_amount {
+                    soroban_sdk::panic_with_error!(env, DonationError::InvalidDonationBounds);
+                }
+            }
+            _ => {}
+        }
     }
 
     fn contains_address(vec: &Vec<Address>, target: &Address) -> bool {
@@ -2752,6 +2817,124 @@ mod tests {
 
         donation_client.set_min_donation(&200);
         donation_client.set_max_donation(&100);
+    }
+
+    fn two_admin_donation(
+        env: &Env,
+    ) -> (DonationContractClient<'_>, Address, Address) {
+        let admin1 = Address::generate(env);
+        let admin2 = Address::generate(env);
+        let mut admins = Vec::new(env);
+        admins.push_back(admin1.clone());
+        admins.push_back(admin2.clone());
+        let (donation_client, _registry_client) = deploy_pair(env, admins, 2, 0);
+        (donation_client, admin1, admin2)
+    }
+
+    #[test]
+    fn test_propose_rejects_invalid_threshold() {
+        let env = Env::default();
+        env.mock_all_auths_allowing_non_root_auth();
+        let (client, admin1, _admin2) = two_admin_donation(&env);
+
+        assert_eq!(
+            client.try_propose_admin_action(&admin1, &AdminAction::SetThreshold(0)),
+            Err(Ok(DonationError::InvalidThreshold.into()))
+        );
+        assert_eq!(
+            client.try_propose_admin_action(&admin1, &AdminAction::SetThreshold(3)),
+            Err(Ok(DonationError::InvalidThreshold.into()))
+        );
+    }
+
+    #[test]
+    fn test_propose_rejects_add_existing_admin() {
+        let env = Env::default();
+        env.mock_all_auths_allowing_non_root_auth();
+        let (client, admin1, admin2) = two_admin_donation(&env);
+
+        assert_eq!(
+            client.try_propose_admin_action(&admin1, &AdminAction::AddAdmin(admin2)),
+            Err(Ok(DonationError::AlreadyAdmin.into()))
+        );
+    }
+
+    #[test]
+    fn test_propose_rejects_remove_non_admin() {
+        let env = Env::default();
+        env.mock_all_auths_allowing_non_root_auth();
+        let (client, admin1, _admin2) = two_admin_donation(&env);
+
+        let outsider = Address::generate(&env);
+        assert_eq!(
+            client.try_propose_admin_action(&admin1, &AdminAction::RemoveAdmin(outsider)),
+            Err(Ok(DonationError::NotAnAdmin.into()))
+        );
+    }
+
+    #[test]
+    fn test_propose_rejects_remove_admin_breaking_threshold() {
+        let env = Env::default();
+        env.mock_all_auths_allowing_non_root_auth();
+        let (client, admin1, admin2) = two_admin_donation(&env);
+
+        assert_eq!(
+            client.try_propose_admin_action(&admin1, &AdminAction::RemoveAdmin(admin2)),
+            Err(Ok(DonationError::ThresholdExceedsAdmins.into()))
+        );
+    }
+
+    #[test]
+    fn test_propose_rejects_invalid_donation_bounds() {
+        let env = Env::default();
+        env.mock_all_auths_allowing_non_root_auth();
+        let (client, admin1, admin2) = two_admin_donation(&env);
+
+        assert_eq!(
+            client.try_propose_admin_action(&admin1, &AdminAction::SetMinDonation(-1)),
+            Err(Ok(DonationError::InvalidAmount.into()))
+        );
+        assert_eq!(
+            client.try_propose_admin_action(&admin1, &AdminAction::SetMaxDonation(-1)),
+            Err(Ok(DonationError::InvalidAmount.into()))
+        );
+
+        let max_prop = client.propose_admin_action(&admin1, &AdminAction::SetMaxDonation(100));
+        client.approve_admin_action(&admin2, &max_prop);
+        client.execute_admin_action(&admin1, &max_prop);
+
+        assert_eq!(
+            client.try_propose_admin_action(&admin1, &AdminAction::SetMinDonation(200)),
+            Err(Ok(DonationError::InvalidDonationBounds.into()))
+        );
+
+        let min_prop = client.propose_admin_action(&admin1, &AdminAction::SetMinDonation(50));
+        client.approve_admin_action(&admin2, &min_prop);
+        client.execute_admin_action(&admin1, &min_prop);
+        assert_eq!(
+            client.try_propose_admin_action(&admin1, &AdminAction::SetMaxDonation(10)),
+            Err(Ok(DonationError::InvalidDonationBounds.into()))
+        );
+    }
+
+    #[test]
+    fn test_execute_rejects_stale_noop_add_admin() {
+        let env = Env::default();
+        env.mock_all_auths_allowing_non_root_auth();
+        let (client, admin1, admin2) = two_admin_donation(&env);
+
+        let newcomer = Address::generate(&env);
+        let p1 = client.propose_admin_action(&admin1, &AdminAction::AddAdmin(newcomer.clone()));
+        let p2 = client.propose_admin_action(&admin1, &AdminAction::AddAdmin(newcomer.clone()));
+        client.approve_admin_action(&admin2, &p1);
+        client.approve_admin_action(&admin2, &p2);
+        client.execute_admin_action(&admin1, &p1);
+
+        assert_eq!(
+            client.try_execute_admin_action(&admin1, &p2),
+            Err(Ok(DonationError::AlreadyAdmin.into()))
+        );
+        assert!(!client.get_proposal(&p2).unwrap().executed);
     }
 
     #[test]
