@@ -89,12 +89,13 @@ describe("startTwitterAuth (#14)", () => {
   });
 
   it("rejects a state after its 10-minute TTL even if it was never swept (#438)", async () => {
-    const state = new URL(startTwitterAuth()).searchParams.get("state")!;
+    const { redirectUrl, bindingNonce } = startTwitterAuth();
+    const state = new URL(redirectUrl).searchParams.get("state")!;
     const now = Date.now();
     const spy = jest.spyOn(Date, "now").mockReturnValue(now + 11 * 60 * 1000);
 
     try {
-      await expect(completeTwitterAuth("code", state)).rejects.toMatchObject({ statusCode: 401 });
+      await expect(completeTwitterAuth("code", state, bindingNonce)).rejects.toMatchObject({ statusCode: 401 });
     } finally {
       spy.mockRestore();
     }

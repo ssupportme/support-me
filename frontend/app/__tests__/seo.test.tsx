@@ -113,7 +113,7 @@ describe('Creator profile metadata (#459)', () => {
 
   beforeEach(() => {
     vi.mocked(fetchCreatorSummary).mockReset();
-    vi.mocked(fetchCreatorSummary).mockResolvedValue(creator);
+    vi.mocked(fetchCreatorSummary).mockResolvedValue({ status: 'found', creator });
   });
 
   const renderJsonLd = async (username: string) => {

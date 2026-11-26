@@ -5,7 +5,7 @@ import prisma from "../prisma";
 import { asyncHandler } from "../middleware/asyncHandler";
 import { log } from "../lib/logger";
 import { normalizeRecipient } from "../services/email/mailer";
-import { BadRequestError } from "../errors/AppError";
+import { BadRequestError, ServiceUnavailableError } from "../errors/AppError";
 
 const router = Router();
 
@@ -50,7 +50,7 @@ router.post(
   "/resend",
   asyncHandler(async (req, res) => {
     const secret = getWebhookSecret();
-        if (!secret) {
+    if (!secret) {
       log("warn", "email webhook rejected: RESEND_WEBHOOK_SECRET is not configured");
       throw new ServiceUnavailableError("Email webhook is not configured");
     }
@@ -93,22 +93,46 @@ router.post(
       return res.status(200).json({ received: true });
     }
 
-    try {
-      await prisma.emailEvent.create({
-        data: {
-          recipient,
-          subject: event.data.subject || "",
-          type,
-          providerMessageId: event.data.email_id,
-          svixId,
-          errorDetail: event.data.bounce?.message,
-        },
-      });
-    } catch (err) {
-      if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === "P2002") {
-        return res.status(200).json({ received: true });
+    // One event row per recipient (#534): a message can be addressed to
+    // several people, and only recording `to[0]` silently dropped a bounce
+    // for every other one, so the suppressed address was never recorded.
+    // Addresses are normalized and de-duplicated so the same person listed
+    // twice does not produce two identical rows.
+    const recipients = [
+      ...new Set(
+        (Array.isArray(data.to) ? data.to : [])
+          .filter((address): address is string => typeof address === "string" && address.trim().length > 0)
+          .map(normalizeRecipient)
+      ),
+    ];
+
+    if (recipients.length === 0) {
+      log("warn", "email webhook missing recipient", { type: event.type });
+      return res.status(200).json({ received: true });
+    }
+
+    // Idempotency (#498): Resend retries a delivery with the same svix-id, and
+    // one delivery can fan out to several rows, so the unique key is
+    // per-recipient. A retry skips rows that already exist and still records
+    // any recipient a previous attempt failed before reaching.
+    for (const recipient of recipients) {
+      try {
+        await prisma.emailEvent.create({
+          data: {
+            recipient,
+            subject: data.subject || "",
+            type,
+            providerMessageId: data.email_id,
+            svixId: `${svixId}:${recipient}`,
+            errorDetail: data.bounce?.message,
+          },
+        });
+      } catch (err) {
+        if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === "P2002") {
+          continue;
+        }
+        throw err;
       }
-      throw err;
     }
 
     if (type === "BOUNCED" || type === "COMPLAINED") {

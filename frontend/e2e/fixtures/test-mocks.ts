@@ -414,7 +414,7 @@ export async function setupE2EMocks(page: Page, options: SetupE2EOptions = {}) {
     const method = route.request().method();
 
     if (method === 'OPTIONS') {
-      await route.fulfill({ status: 204, headers: CORS_HEADERS });
+      await route.fulfill({ status: 204, headers: authCorsHeaders(route) });
       return;
     }
 
@@ -428,7 +428,7 @@ export async function setupE2EMocks(page: Page, options: SetupE2EOptions = {}) {
       await route.fulfill({
         status: 200,
         contentType: 'application/json',
-        headers: CORS_HEADERS,
+        headers: authCorsHeaders(route),
         body: JSON.stringify({ success: true }),
       });
       return;
@@ -438,7 +438,7 @@ export async function setupE2EMocks(page: Page, options: SetupE2EOptions = {}) {
       await route.fulfill({
         status: 200,
         contentType: 'application/json',
-        headers: CORS_HEADERS,
+        headers: authCorsHeaders(route),
         body: JSON.stringify(activeSubscriptions),
       });
     } else if (method === 'POST') {
@@ -466,7 +466,7 @@ export async function setupE2EMocks(page: Page, options: SetupE2EOptions = {}) {
       await route.fulfill({
         status: 201,
         contentType: 'application/json',
-        headers: CORS_HEADERS,
+        headers: authCorsHeaders(route),
         body: JSON.stringify(newSub),
       });
     } else {

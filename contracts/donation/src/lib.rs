@@ -260,6 +260,15 @@ pub enum DonationError {
     /// The proposal's lifetime (`created_at + ADMIN_PROPOSAL_TTL_SECONDS`)
     /// has elapsed and it can no longer be approved or executed.
     ProposalExpired = 29,
+    /// `AddAdmin` targets an address that is already an admin (#560).
+    AdminAlreadyExists = 30,
+    /// `RemoveAdmin` targets an address that is not an admin (#560).
+    AdminNotFound = 31,
+    /// A proposed min/max donation would leave the minimum above the
+    /// maximum while both are non-zero (#560).
+    InvalidDonationLimits = 32,
+    /// `donate` or `subscribe` was called with donor == creator.
+    SelfDonation = 33,
 }
 
 #[contractevent(topics = ["sub_failed"])]
@@ -717,17 +726,16 @@ impl DonationContract {
             // marked executed (#560).
             AdminAction::AddAdmin(new_admin) => {
                 let mut admins: Vec<Address> = env.storage().instance().get(&ADMINS_KEY).unwrap();
-                if !Self::contains_address(&admins, &new_admin) {
-                    admins.push_back(new_admin.clone());
-                    env.storage().instance().set(&ADMINS_KEY, &admins);
-                    AdminAddedEvent {
-                        admin: new_admin,
-                        total_admins: admins.len(),
-                    }
-                    .publish(&env);
+                if Self::contains_address(&admins, &new_admin) {
+                    soroban_sdk::panic_with_error!(&env, DonationError::AdminAlreadyExists);
                 }
-                admins.push_back(new_admin);
+                admins.push_back(new_admin.clone());
                 env.storage().instance().set(&ADMINS_KEY, &admins);
+                AdminAddedEvent {
+                    admin: new_admin,
+                    total_admins: admins.len(),
+                }
+                .publish(&env);
             }
             AdminAction::RemoveAdmin(old_admin) => {
                 let admins: Vec<Address> = env.storage().instance().get(&ADMINS_KEY).unwrap();
@@ -1738,10 +1746,6 @@ mod tests {
         (admin, donation_client, registry_client)
     }
 
-    fn instance_ttl(env: &Env, contract: &Address) -> u32 {
-        env.as_contract(contract, || env.storage().instance().get_ttl())
-    }
-
     fn lower_instance_ttl(env: &Env) {
         env.ledger().with_mut(|li| {
             li.sequence_number +=
@@ -1758,17 +1762,15 @@ mod tests {
     }
 
     #[test]
-    fn test_initialize_extends_instance_ttl() {
+    fn test_constructor_extends_instance_ttl() {
         let env = Env::default();
         env.mock_all_auths_allowing_non_root_auth();
-        let contract_id = env.register(DonationContract, ());
-        let donation_client = DonationContractClient::new(&env, &contract_id);
         let admin = Address::generate(&env);
         let registry = Address::generate(&env);
-
-        assert_instance_ttl_is_low(&env, &contract_id);
-
-        donation_client.initialize(&admin, &registry);
+        let contract_id = env.register(
+            DonationContract,
+            (Vec::from_array(&env, [admin]), 1u32, 0u64, registry),
+        );
 
         assert_instance_ttl_was_extended(&env, &contract_id);
     }
@@ -3792,19 +3794,6 @@ mod tests {
         assert_eq!(sub_don.amount, 500);
         assert_eq!(sub_don.creator, creator);
         assert_eq!(sub_don.donor, donor);
-    }
-
-    #[test]
-<<<<<<< HEAD
-    #[should_panic(expected = "duplicate admin in admin list")]
-    fn test_initialize_multisig_rejects_duplicate_admins() {
-        let env = Env::default();
-        env.mock_all_auths();
-        let admin = Address::generate(&env);
-        let admins = soroban_sdk::vec![&env, admin.clone(), admin.clone()];
-        let donation_id = env.register(DonationContract, ());
-        let client = DonationContractClient::new(&env, &donation_id);
-        client.initialize_multisig(&admins, &1u32, &0u64, &Address::generate(&env));
     }
 
     #[test]

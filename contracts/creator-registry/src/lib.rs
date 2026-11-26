@@ -513,17 +513,16 @@ impl CreatorRegistryContract {
             // marked executed (#560).
             AdminAction::AddAdmin(new_admin) => {
                 let mut admins: Vec<Address> = env.storage().instance().get(&ADMINS_KEY).unwrap();
-                if !Self::contains_address(&admins, &new_admin) {
-                    admins.push_back(new_admin.clone());
-                    env.storage().instance().set(&ADMINS_KEY, &admins);
-                    AdminAddedEvent {
-                        admin: new_admin,
-                        total_admins: admins.len(),
-                    }
-                    .publish(&env);
+                if Self::contains_address(&admins, &new_admin) {
+                    soroban_sdk::panic_with_error!(&env, RegistryError::AdminAlreadyExists);
                 }
-                admins.push_back(new_admin);
+                admins.push_back(new_admin.clone());
                 env.storage().instance().set(&ADMINS_KEY, &admins);
+                AdminAddedEvent {
+                    admin: new_admin,
+                    total_admins: admins.len(),
+                }
+                .publish(&env);
             }
             AdminAction::RemoveAdmin(old_admin) => {
                 let admins: Vec<Address> = env.storage().instance().get(&ADMINS_KEY).unwrap();
@@ -1935,7 +1934,6 @@ mod tests {
             client.try_approve_admin_action(&admin2, &prop2_id),
             Err(Ok(RegistryError::ProposalExpired.into()))
         );
-    }
     }
 
     #[test]

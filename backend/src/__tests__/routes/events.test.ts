@@ -16,8 +16,6 @@ import {
   resetEventsConnections,
   setEventsConnectionLimits,
 } from "../../routes/events";
-import { generateToken } from "../../middleware/auth";
-import { resetEventsConnections, setEventsConnectionLimits } from "../../routes/events";
 import { generateToken, clearDeletedAtCache } from "../../middleware/auth";
 
 const mockedPrisma = prisma as unknown as { user: { findUnique: jest.Mock } };

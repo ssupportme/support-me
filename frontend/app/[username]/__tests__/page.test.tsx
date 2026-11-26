@@ -43,6 +43,7 @@ describe('CreatorProfilePage JSON-LD', () => {
         bio: 'Building cool things on Stellar.',
         avatarUrl: 'https://cdn.example.com/avatar.png',
         donationGoal: null,
+        updatedAt: '2026-05-01T12:00:00.000Z',
       },
     });
 
@@ -73,6 +74,7 @@ describe('CreatorProfilePage JSON-LD', () => {
         bio: null,
         avatarUrl: null,
         donationGoal: null,
+        updatedAt: '2026-05-01T12:00:00.000Z',
       },
     });
 

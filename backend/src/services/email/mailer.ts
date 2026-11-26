@@ -57,12 +57,12 @@ async function isSuppressed(to: string): Promise<boolean> {
  * mean the same thing here: the provider call hit our deadline (#530).
  */
 function isAbortError(err: unknown): boolean {
-  return (
-    err instanceof Error &&
-    (err.name === "AbortError" ||
-      err.name === "TimeoutError" ||
-      (err as { code?: string }).code === "ABORT_ERR")
-  );
+  // Duck-typed rather than `instanceof Error`: the DOMException raised by
+  // AbortSignal.timeout() can come from another realm (jest's sandbox, vm
+  // contexts), where instanceof is false even though it is a real abort.
+  if (typeof err !== "object" || err === null) return false;
+  const { name, code } = err as { name?: unknown; code?: unknown };
+  return name === "AbortError" || name === "TimeoutError" || code === "ABORT_ERR";
 }
 
 /**

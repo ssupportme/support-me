@@ -209,6 +209,12 @@ Codes are only unique within one enum.
 | 25 | `MultiSigRequired` |
 | 26 | `ExecutorNotSet` |
 | 27 | `Overflow` |
+| 28 | `ProposalCancelled` |
+| 29 | `ProposalExpired` |
+| 30 | `AdminAlreadyExists` |
+| 31 | `AdminNotFound` |
+| 32 | `InvalidDonationLimits` |
+| 33 | `SelfDonation` |
 
 Code 9 is not used.
 

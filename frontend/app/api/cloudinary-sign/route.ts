@@ -9,8 +9,7 @@ import { RateLimiter } from '@/lib/rateLimiter';
 //
 // Needs three env vars (see .env.local.example):
 //   CLOUDINARY_CLOUD_NAME, CLOUDINARY_API_KEY, CLOUDINARY_API_SECRET
-// plus the backend's JWT_SECRET, the shared secret this route verifies session
-// tokens with — a signature is only ever handed to a signed-in creator.
+// A signature is only ever handed to a signed-in creator (see isAuthenticated).
 //
 // We pin the upload to a fixed folder and let Cloudinary's incoming
 // transformation downscale avatars, so a signed request can't be abused to
@@ -92,45 +91,6 @@ export async function POST(request: NextRequest) {
     return NextResponse.json(
       { error: 'Image uploads are not configured on this deployment.' },
       { status: 501 }
-    );
-  }
-
-  // Without the shared secret there is no way to tell a signed-in creator from
-  // anyone else, so nothing may be signed at all: the same 501 as missing
-  // Cloudinary config, for the same reason — the deployment is misconfigured,
-  // not the request.
-  const authSecret = process.env.JWT_SECRET;
-  if (!authSecret) {
-    return NextResponse.json(
-      { error: 'Image uploads are not configured on this deployment.' },
-      { status: 501 }
-    );
-  }
-
-  const authorization = request.headers.get('authorization') ?? '';
-  const token = authorization.startsWith('Bearer ')
-    ? authorization.slice('Bearer '.length)
-    : '';
-  const user = token ? verifyAuthToken(token, authSecret) : null;
-  if (!user) {
-    return NextResponse.json({ error: 'Sign in to upload an image.' }, { status: 401 });
-  }
-
-  // Both limits are attempted rather than short-circuited, so a script that
-  // hops between accounts still spends its IP's budget on every request.
-  const userKey = `user:${user.id}`;
-  const ipKey = `ip:${clientIp(request)}`;
-  const userAllowed = signatureLimiter.attempt(userKey);
-  const ipAllowed = signatureLimiter.attempt(ipKey);
-
-  if (!userAllowed || !ipAllowed) {
-    const retryAfter = Math.max(
-      signatureLimiter.retryAfterSeconds(userKey),
-      signatureLimiter.retryAfterSeconds(ipKey)
-    );
-    return NextResponse.json(
-      { error: `Too many upload requests. Try again in ${retryAfter} seconds.` },
-      { status: 429, headers: { 'Retry-After': String(retryAfter) } }
     );
   }
 

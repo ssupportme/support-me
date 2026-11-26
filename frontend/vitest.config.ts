@@ -9,6 +9,10 @@ export default defineConfig({
     setupFiles: ['./vitest.setup.ts'],
     globals: true,
     exclude: [...configDefaults.exclude, 'e2e/**'],
+    // Several page tests dynamically import a large page in their first test;
+    // that cold import alone can exceed the 5s default on a loaded CI runner.
+    testTimeout: 20_000,
+    hookTimeout: 20_000,
   },
   resolve: {
     alias: {

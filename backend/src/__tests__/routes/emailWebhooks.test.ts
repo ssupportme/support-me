@@ -73,7 +73,7 @@ describe("POST /api/webhooks/email/resend", () => {
         subject: "Your subscription renewed",
         type: "BOUNCED",
         providerMessageId: "resend-abc",
-        svixId: "msg_test123",
+        svixId: "msg_test123:supporter@example.com",
         errorDetail: "mailbox does not exist",
       },
     });
@@ -98,6 +98,7 @@ describe("POST /api/webhooks/email/resend", () => {
         subject: "Your subscription renewed",
         type: "BOUNCED",
         providerMessageId: "resend-multi",
+        svixId: "msg_test123:first@example.com",
         errorDetail: "mailbox does not exist",
       },
     });
@@ -107,6 +108,7 @@ describe("POST /api/webhooks/email/resend", () => {
         subject: "Your subscription renewed",
         type: "BOUNCED",
         providerMessageId: "resend-multi",
+        svixId: "msg_test123:second@example.com",
         errorDetail: "mailbox does not exist",
       },
     });
@@ -130,6 +132,7 @@ describe("POST /api/webhooks/email/resend", () => {
         subject: "Receipt",
         type: "BOUNCED",
         providerMessageId: "resend-case",
+        svixId: "msg_test123:bob@x.com",
         errorDetail: "mailbox does not exist",
       },
     });
@@ -156,7 +159,7 @@ describe("POST /api/webhooks/email/resend", () => {
         subject: "Receipt",
         type: "DELIVERED",
         providerMessageId: "resend-def",
-        svixId: "msg_test123",
+        svixId: "msg_test123:supporter@example.com",
         errorDetail: undefined,
       },
     });
