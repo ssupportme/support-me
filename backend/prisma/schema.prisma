@@ -8,24 +8,24 @@ datasource db {
 }
 
 model User {
-  id             Int             @id @default(autoincrement())
+  id              Int              @id @default(autoincrement())
   // Nullable: a magic-link (#15) or OAuth (#14) account has no wallet
   // until the user connects one. Still unique when set, so a wallet can
   // never be claimed by more than one account.
-  walletAddress  String?         @unique
+  walletAddress   String?          @unique
   // Contact/sign-in address. Required for a magic-link account (that's
   // the whole identity); optional otherwise, where it's only used for
   // transactional email (recurring-donation renewal/failure, donation
   // -received notices).
-  email          String?         @unique
-  createdAt      DateTime        @default(now())
-  updatedAt      DateTime        @updatedAt
+  email           String?          @unique
+  createdAt       DateTime         @default(now())
+  updatedAt       DateTime         @updatedAt
   // Set by POST /api/account/delete when the holder anonymizes their data;
   // kept as an audit marker (cleared fields are the actual erasure).
-  deletedAt      DateTime?
-  creator        Creator?
-  adminAuditLogs AdminAuditLog[]
-  magicLinks     MagicLinkToken[]
+  deletedAt       DateTime?
+  creator         Creator?
+  adminAuditLogs  AdminAuditLog[]
+  magicLinks      MagicLinkToken[]
   oauthIdentities OAuthIdentity[]
 }
 
@@ -112,7 +112,7 @@ model Creator {
   // empty array and "never configured" stay distinguishable if that
   // matters later. Denominated in whatever asset the supporter picks on
   // the donate page, same as Goal.currency — not tied to a single currency.
-  presetAmounts Decimal[]      @default([]) @db.Decimal(20, 7)
+  presetAmounts Decimal[]      @default(dbgenerated("(ARRAY[]::numeric[])::numeric(20,7)[]")) @db.Decimal(20, 7)
   // Custom public-profile theme (#227): { backgroundColor, accentColor,
   // font, layout }, validated by schemas/creators.ts's themeSchema. Null
   // means the default design, so existing creators are unaffected.
@@ -123,58 +123,58 @@ model Creator {
   withdrawals   Withdrawal[]
   subscriptions Subscription[]
   goals         Goal[]
-
-  @@index([walletAddress])
   // A connected walletAddress is unique across creators (#276). That is a
   // partial unique index ("walletAddress" <> '') created in migration
   // 20261018000000_creator_wallet_unique, which Prisma's schema language
   // cannot express, so it is not declared here. Unconnected wallets are null;
   // a database check constraint prevents the former empty-string sentinel.
+
+  @@index([walletAddress])
 }
 
 model Donation {
-  id              Int                     @id @default(autoincrement())
-  creator         Creator                 @relation(fields: [creatorId], references: [id])
-  creatorId       Int
-  senderAddress   String
+  id               Int                     @id @default(autoincrement())
+  creator          Creator                 @relation(fields: [creatorId], references: [id])
+  creatorId        Int
+  senderAddress    String
   // DB CHECK "Donation_amount_positive" (> 0), added in migration
   // 20261124130000_add_money_and_interval_checks. The Soroban listener writes
   // here without going through the HTTP zod schemas, so positivity cannot be
   // an application-only invariant (#485).
-  amount          Decimal                 @db.Decimal(20, 7)
-  currency        String                  @default("XLM")
-  message         String?
-  transactionHash String?
+  amount           Decimal                 @db.Decimal(20, 7)
+  currency         String                  @default("XLM")
+  message          String?
+  transactionHash  String?
   // Stable identity for donations discovered from Soroban events. Replaying a
   // ledger lookback after a restart must not create another row.
-  onChainEventId  String?                 @unique
-  rpcEventId      String?                 @unique
-  operationIndex  Int                     @default(0)
-  eventIndex      Int                     @default(0)
+  onChainEventId   String?                 @unique
+  rpcEventId       String?                 @unique
+  operationIndex   Int                     @default(0)
+  eventIndex       Int                     @default(0)
   // Client-reported rows are provisional until the Soroban listener verifies
   // the corresponding event; legacy rows remain visible by default.
-  verified        Boolean                 @default(true)
+  verified         Boolean                 @default(true)
   // Chain-authoritative donations are retained even if the creator has opted
   // out of their asset; this records whether the asset was accepted at reconcile time.
-  currencyAccepted Boolean                @default(true)
-  createdAt       DateTime                @default(now())
-  idempotencyKey  DonationIdempotencyKey?
+  currencyAccepted Boolean                 @default(true)
+  createdAt        DateTime                @default(now())
+  idempotencyKey   DonationIdempotencyKey?
 
+  @@unique([transactionHash, operationIndex, eventIndex])
   // Hot-path indexes (#264). The feed filters by creator and `verified` and
   // orders by `createdAt`; the leaderboard groups by `currency`; account
   // export and confirmation emails look donations up by sender.
   @@index([creatorId, verified, createdAt])
   @@index([senderAddress])
   @@index([currency, verified])
-  @@unique([transactionHash, operationIndex, eventIndex])
 }
 
 model DonationIdempotencyKey {
-  key        String   @id
-  donationId Int      @unique
-  donation   Donation @relation(fields: [donationId], references: [id], onDelete: Cascade)
-  expiresAt  DateTime
-  createdAt  DateTime @default(now())
+  key         String   @id
+  donationId  Int      @unique
+  donation    Donation @relation(fields: [donationId], references: [id], onDelete: Cascade)
+  expiresAt   DateTime
+  createdAt   DateTime @default(now())
   // SHA-256 of the canonical request fields (#391). Nullable because keys
   // created before this change cannot be verified; a replay of one is treated
   // as a mismatch rather than silently returning the original donation.
@@ -217,28 +217,28 @@ model Withdrawal {
 // summing donations on every page load, which stopped being workable once a
 // single donation can count toward several simultaneously-active goals.
 model Goal {
-  id            Int                 @id @default(autoincrement())
-  creator       Creator             @relation(fields: [creatorId], references: [id], onDelete: Cascade)
-  creatorId     Int
+  id                 Int                 @id @default(autoincrement())
+  creator            Creator             @relation(fields: [creatorId], references: [id], onDelete: Cascade)
+  creatorId          Int
   // Short label so a creator with multiple goals can tell them apart in the
   // UI (e.g. "New microphone", "Monthly support"). Optional: a goal migrated
   // from the old single `donationGoal` field has none.
-  title         String?
+  title              String?
   // Optional longer blurb shown under the title on the public profile
   // (e.g. what the funds are for).
-  description   String?
+  description        String?
   // DB CHECKs "Goal_targetAmount_positive" (> 0) and
   // "Goal_currentAmount_nonnegative" (>= 0), added in migration
   // 20261124130000_add_money_and_interval_checks. Zero progress is valid; a
   // negative target or progress is not.
-  targetAmount  Decimal             @db.Decimal(20, 7)
-  currentAmount Decimal             @default(0) @db.Decimal(20, 7)
+  targetAmount       Decimal             @db.Decimal(20, 7)
+  currentAmount      Decimal             @default(0) @db.Decimal(20, 7)
   // Asset this goal is denominated in ("XLM", "USDC", "USDT", ...). Amounts
   // are tracked per-asset, never normalized to USD — see the reasoning in
   // services/goalService.ts.
-  currency      String              @default("XLM")
-  status        GoalStatus          @default(ACTIVE)
-  recurring     Boolean             @default(false)
+  currency           String              @default("XLM")
+  status             GoalStatus          @default(ACTIVE)
+  recurring          Boolean             @default(false)
   // Only meaningful when `recurring` is true. Limited to the two intervals
   // the issue actually asks for ("e.g. monthly") rather than a general cron
   // expression, which nothing here needs yet.
@@ -248,9 +248,9 @@ model Goal {
   // `now() + interval` when a recurring goal is created, then advanced from
   // the previous end (not the reset time) on each reset so it never drifts.
   currentPeriodEnd   DateTime?
-  createdAt     DateTime            @default(now())
-  updatedAt     DateTime            @updatedAt
-  periods       GoalPeriod[]
+  createdAt          DateTime            @default(now())
+  updatedAt          DateTime            @updatedAt
+  periods            GoalPeriod[]
 
   @@index([creatorId])
   @@index([recurring, currentPeriodEnd])
@@ -295,7 +295,7 @@ model Subscription {
   // "Subscription_intervalSecs_positive" (> 0), added in migration
   // 20261124130000_add_money_and_interval_checks. A zero interval would make
   // the executor re-charge on every tick.
-  amount            Decimal @db.Decimal(20, 7) // amount charged per interval
+  amount            Decimal   @db.Decimal(20, 7) // amount charged per interval
   intervalSecs      Int
   onChainId         Int       @unique // subscription_id returned by the donation contract's subscribe()
   subscribeTxHash   String?
