@@ -228,7 +228,19 @@ describe("POST /api/webhooks/email/resend", () => {
       data: { to: ["supporter@example.com"] },
     });
 
-    expect(res.status).toBe(500);
+    expect(res.status).toBe(503);
+    expect(res.body.error).toMatch(/not configured/i);
+    expect(mockedPrisma.emailEvent.create).not.toHaveBeenCalled();
+  });
+
+
+  it("rejects an unsigned payload when the secret is configured", async () => {
+    const res = await request(app)
+      .post("/api/webhooks/email/resend")
+      .set("Content-Type", "application/json")
+      .send(JSON.stringify({ type: "email.bounced", data: { to: ["supporter@example.com"] } }));
+
+    expect(res.status).toBe(400);
     expect(mockedPrisma.emailEvent.create).not.toHaveBeenCalled();
   });
 });

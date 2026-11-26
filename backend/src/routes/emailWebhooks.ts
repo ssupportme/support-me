@@ -20,12 +20,8 @@ const router = Router();
 // a CJS build, so it's used directly here. Resend's docs name the headers
 // svix-id/svix-timestamp/svix-signature; standardwebhooks itself expects
 // webhook-id/webhook-timestamp/webhook-signature, so they're mapped below.
-function getWebhookSecret(): string {
-  const secret = process.env.RESEND_WEBHOOK_SECRET;
-  if (!secret) {
-    throw new Error("RESEND_WEBHOOK_SECRET is not configured");
-  }
-  return secret;
+function getWebhookSecret(): string | undefined {
+  return process.env.RESEND_WEBHOOK_SECRET?.trim() || undefined;
 }
 
 interface ResendWebhookPayload {
@@ -54,6 +50,10 @@ router.post(
   "/resend",
   asyncHandler(async (req, res) => {
     const secret = getWebhookSecret();
+        if (!secret) {
+      log("warn", "email webhook rejected: RESEND_WEBHOOK_SECRET is not configured");
+      throw new ServiceUnavailableError("Email webhook is not configured");
+    }
     const payloadBody = req.body;
     if (!Buffer.isBuffer(payloadBody)) {
       throw new BadRequestError("Expected raw request body for webhook signature verification");
