@@ -51,7 +51,7 @@
     "jsdom": "^29.1.1",
     "tailwindcss": "^4.2.2",
     "typescript": "^5",
-    "vitest": "^4.1.9"
+    "vitest": "^5.1.1"
   },
   "allowScripts": {
     "@reown/appkit@1.8.12": true,
