@@ -33,11 +33,10 @@ export default function ActivityPage() {
     [data]
   );
 
-  useEffect(() => {
-    if (currencies.length > 0 && (!earningsCurrency || !currencies.includes(earningsCurrency))) {
-      setEarningsCurrency(currencies[0]);
-    }
-  }, [currencies, earningsCurrency]);
+  // Derived during render rather than synced in an effect, so the first
+  // paint after data arrives already has a currency selected.
+  const selectedCurrency =
+    earningsCurrency && currencies.includes(earningsCurrency) ? earningsCurrency : (currencies[0] ?? null);
 
   const fetchOverview = useCallback(async () => {
     setLoading(true);
@@ -143,10 +142,10 @@ export default function ActivityPage() {
                         <button
                           key={currency}
                           type="button"
-                          aria-pressed={earningsCurrency === currency}
+                          aria-pressed={selectedCurrency === currency}
                           onClick={() => setEarningsCurrency(currency)}
                           className={`px-2.5 py-1 text-xs font-bold transition-colors ${
-                            earningsCurrency === currency
+                            selectedCurrency === currency
                               ? 'bg-ink text-white'
                               : 'bg-transparent text-ink hover:bg-accent-bg'
                           }`}
@@ -160,10 +159,10 @@ export default function ActivityPage() {
                 <p className="text-ink/70 text-xs font-medium mt-1">
                   Verified donations received by all creators combined, per currency
                 </p>
-                {currencies.length > 0 && earningsCurrency ? (
+                {currencies.length > 0 && selectedCurrency ? (
                   <p className="text-4xl font-extrabold text-ink mt-2 tabular-nums">
-                    {(data?.earningsByCurrency[earningsCurrency] ?? 0).toFixed(2)}{' '}
-                    <span className="text-xl">{earningsCurrency}</span>
+                    {(data?.earningsByCurrency[selectedCurrency] ?? 0).toFixed(2)}{' '}
+                    <span className="text-xl">{selectedCurrency}</span>
                   </p>
                 ) : (
                   <p className="text-4xl font-extrabold text-ink/40 mt-2 tabular-nums">—</p>

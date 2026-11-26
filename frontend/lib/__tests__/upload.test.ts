@@ -64,16 +64,13 @@ describe('uploadAvatar (#364)', () => {
     );
   });
 
-  it('omits the Authorization header when there is no token', async () => {
+  it('rejects before requesting a signature when there is no token', async () => {
     const fetchMock = vi.fn(async () => new Response(JSON.stringify(sign), { status: 200 }));
     vi.stubGlobal('fetch', fetchMock);
 
-    await uploadAvatar(makeFile(), null).catch(() => {});
+    await expect(uploadAvatar(makeFile(), null)).rejects.toThrow('Your session has expired');
 
-    expect(fetchMock).toHaveBeenCalledWith(
-      '/api/cloudinary-sign',
-      expect.objectContaining({ headers: undefined })
-    );
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it('surfaces the signing route 401 as an UploadError', async () => {
@@ -82,8 +79,8 @@ describe('uploadAvatar (#364)', () => {
       vi.fn(async () => new Response(JSON.stringify({ error: 'Authentication required' }), { status: 401 }))
     );
 
-    await expect(uploadAvatar(makeFile(), null)).rejects.toThrow(UploadError);
-    await expect(uploadAvatar(makeFile(), null)).rejects.toThrow('Authentication required');
+    await expect(uploadAvatar(makeFile(), 'jwt-token')).rejects.toThrow(UploadError);
+    await expect(uploadAvatar(makeFile(), 'jwt-token')).rejects.toThrow('Authentication required');
   });
 
   it('rejects a non-image file before any network call', async () => {
@@ -140,7 +137,7 @@ describe('uploadAvatar (#364)', () => {
   it('reports a signing failure with no error body as a generic UploadError', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => new Response('{}', { status: 500 })));
 
-    await expect(uploadAvatar(makeFile(), null)).rejects.toThrow('Could not start the upload.');
+    await expect(uploadAvatar(makeFile(), 'jwt-token')).rejects.toThrow('Could not start the upload.');
   });
 
   it('reports an unreachable signing service as an UploadError', async () => {
@@ -148,7 +145,7 @@ describe('uploadAvatar (#364)', () => {
       throw new Error('network down');
     }));
 
-    await expect(uploadAvatar(makeFile(), null)).rejects.toThrow('Could not reach the upload service.');
+    await expect(uploadAvatar(makeFile(), 'jwt-token')).rejects.toThrow('Could not reach the upload service.');
   });
 
   it('surfaces the Cloudinary error message when the upload itself fails', async () => {
@@ -163,7 +160,7 @@ describe('uploadAvatar (#364)', () => {
     });
     vi.stubGlobal('fetch', fetchMock);
 
-    await expect(uploadAvatar(makeFile(), null)).rejects.toThrow('Invalid image file');
+    await expect(uploadAvatar(makeFile(), 'jwt-token')).rejects.toThrow('Invalid image file');
   });
 
   it('reports a missing secure URL after a successful upload', async () => {
@@ -176,7 +173,7 @@ describe('uploadAvatar (#364)', () => {
     });
     vi.stubGlobal('fetch', fetchMock);
 
-    await expect(uploadAvatar(makeFile(), null)).rejects.toThrow(
+    await expect(uploadAvatar(makeFile(), 'jwt-token')).rejects.toThrow(
       'Upload succeeded but no image URL was returned.'
     );
   });
