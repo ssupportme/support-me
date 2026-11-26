@@ -1,5 +1,7 @@
 export interface PendingTwitterState {
   codeVerifier: string;
+  /** Hex SHA-256 of the browser-binding nonce set as a cookie when the flow starts. */
+  bindingHash: string;
   expiresAt: number;
 }
 
@@ -57,6 +59,17 @@ export class TwitterStateStore {
     if (!entry) return undefined;
     this.entries.delete(state);
     return entry.expiresAt > now ? entry : undefined;
+  }
+
+  /**
+   * Reads an entry without removing it, or `undefined` if it is missing or
+   * expired. Lets a caller validate the entry (e.g. the browser binding)
+   * before spending the single-use `consume`, so a wrong guess cannot burn
+   * someone else's in-flight state.
+   */
+  peek(state: string, now = Date.now()): PendingTwitterState | undefined {
+    const entry = this.entries.get(state);
+    return entry && entry.expiresAt > now ? entry : undefined;
   }
 
   get size(): number {

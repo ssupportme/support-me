@@ -2,6 +2,7 @@ import { TwitterStateStore } from "../../services/twitterStateStore";
 
 const entry = (expiresAt = Date.now() + 60_000) => ({
   codeVerifier: "verifier",
+  bindingHash: "binding-hash",
   expiresAt,
 });
 
@@ -11,7 +12,11 @@ describe("TwitterStateStore (#438)", () => {
 
     store.set("state-1", entry());
 
-    expect(store.consume("state-1")).toEqual({ codeVerifier: "verifier", expiresAt: expect.any(Number) });
+    expect(store.consume("state-1")).toEqual({
+      codeVerifier: "verifier",
+      bindingHash: "binding-hash",
+      expiresAt: expect.any(Number),
+    });
     expect(store.consume("state-1")).toBeUndefined();
     expect(store.size).toBe(0);
   });

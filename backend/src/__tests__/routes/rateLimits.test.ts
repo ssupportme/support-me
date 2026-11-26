@@ -21,7 +21,7 @@ import request from "supertest";
 import { Keypair } from "@stellar/stellar-sdk";
 import app from "../../app";
 import prisma from "../../prisma";
-import { completeTwitterAuth } from "../../services/twitterAuth";
+import { completeTwitterAuth, startTwitterAuth } from "../../services/twitterAuth";
 import {
   challenges,
   challengeIpLimiter,
@@ -136,6 +136,10 @@ describe("POST /api/auth/magic-link rate limiting (#25)", () => {
 
 describe("GET /api/auth/twitter rate limiting (#438)", () => {
   it("rejects starting a sign-in past 30 a minute from one IP with 429 and Retry-After", async () => {
+    (startTwitterAuth as jest.Mock).mockReturnValue({
+      redirectUrl: "https://twitter.com/i/oauth2/authorize?state=s",
+      bindingNonce: "nonce",
+    });
     for (let i = 0; i < 30; i++) {
       const ok = await request(app).get("/api/auth/twitter");
       expect(ok.status).toBe(200);

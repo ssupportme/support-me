@@ -15,15 +15,7 @@ import { TwitterStateStore } from "./twitterStateStore";
 export const TWITTER_OAUTH_STATE_TTL_MS = 10 * 60 * 1000;
 const PROVIDER = "twitter";
 
-interface PendingState {
-  codeVerifier: string;
-  bindingHash: string;
-  expiresAt: number;
-}
-
-const STATE_TTL_MS = 10 * 60 * 1000;
 const STATE_MAX_ENTRIES = 1_000;
-const PROVIDER = "twitter";
 
 // Keyed by the opaque `state` param round-tripped through the redirect, the
 // same pattern as the wallet challenge flow in routes/auth.ts but bounded and
@@ -79,8 +71,9 @@ export async function completeTwitterAuth(
     throw new BadRequestError("code and state are required");
   }
 
-  pruneExpiredStates();
-  const pending = pendingStates.get(state);
+  // Validate the browser binding against a peek first: a callback that fails
+  // it must not consume (and so destroy) the legitimate user's pending state.
+  const pending = pendingStates.peek(state);
   if (!pending || !bindingNonce) {
     throw new UnauthorizedError("Invalid or expired OAuth state, please try again");
   }
@@ -90,9 +83,10 @@ export async function completeTwitterAuth(
     providedHash.length !== expectedHash.length ||
     !timingSafeEqual(providedHash, expectedHash)
   ) {
-  // consume() is single-use and drops expired states, like the wallet challenge.
-  const pending = pendingStates.consume(state);
-  if (!pending) {
+    throw new UnauthorizedError("Invalid or expired OAuth state, please try again");
+  }
+  // consume() is single-use: a concurrent replay of the same state loses here.
+  if (!pendingStates.consume(state)) {
     throw new UnauthorizedError("Invalid or expired OAuth state, please try again");
   }
 
