@@ -30,7 +30,7 @@ jobs:
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@master
         with:
-          toolchain: 1.91.0
+          toolchain: 1.92.0
           targets: wasm32v1-none
           components: rustfmt, clippy
 
@@ -46,8 +46,16 @@ jobs:
       - name: Lint (clippy)
         run: cargo clippy --workspace --all-targets --locked -- -D warnings
 
-      - name: Build contracts to WASM
-        run: cargo build --workspace --target wasm32v1-none --release --locked
+      # The deployable artifact is the optimized build: the raw cargo output is
+      # well over the size budget. Pinned to a commit SHA; the action takes the
+      # CLI version from `version` when it is not called by tag.
+      - name: Install stellar-cli
+        uses: stellar/stellar-cli@28484880988199233a7e8e87c97cb12dac323cb3 # v25.2.0
+        with:
+          version: 25.2.0
+
+      - name: Build contracts to WASM (optimized)
+        run: stellar contract build --optimize --locked
 
       - name: Check WASM artifact size budget
         run: |
@@ -61,10 +69,16 @@ jobs:
             exit 1
           fi
 
+      # Run on the current stable toolchain, not the project's pin: cargo-audit
+      # raises its minimum Rust version independently of the contracts' pin,
+      # and `cargo install` inside the repo would otherwise pick up
+      # rust-toolchain.toml and fail to compile it. `+stable` bypasses the pin;
+      # `cargo audit` only reads Cargo.lock, so it does not need the pin either.
       - name: Security advisory scan
-        uses: rustsec/audit-check@v2.0.0
-        with:
-          token: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          rustup toolchain install stable --profile minimal
+          cargo +stable install cargo-audit --locked
+          cargo +stable audit
 
   backend:
     name: Backend (Node/Express)

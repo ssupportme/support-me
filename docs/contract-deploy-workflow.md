@@ -10,7 +10,7 @@ deployment that changes contracts holding live state.
 ## Before you deploy
 
 - Review the contract changes and run the Rust checks below.
-- The repository pins Rust 1.84.0 via `rust-toolchain.toml` with the `wasm32v1-none` target and components (`rustfmt`, `clippy`).
+- The repository pins Rust 1.92.0 via `rust-toolchain.toml` with the `wasm32v1-none` target and components (`rustfmt`, `clippy`).
 - Install the current Stellar CLI (`stellar`). Keep the CLI version recorded with the release notes.
 - Use a funded Testnet deployer account. For production promotion, use the
   approved admin/multisig process; do not use a developer's personal wallet.
@@ -29,11 +29,14 @@ From the repository root:
 rustup target add wasm32v1-none
 cargo fmt --all -- --check
 cargo test --workspace --locked
-cargo build --manifest-path contracts/creator-registry/Cargo.toml \
-  --target wasm32v1-none --release --locked
-cargo build --manifest-path contracts/donation/Cargo.toml \
-  --target wasm32v1-none --release --locked
+stellar contract build --optimize --locked
 ```
+
+Use `stellar contract build --optimize`, not a plain `cargo build`: the optimized
+artifact is the deployable one, and the raw cargo output is much larger than
+the 64 KB limit. The CLI also refuses Rust versions that emit Wasm Soroban
+cannot run (1.81-1.83 and 1.91.0), which is why `rust-toolchain.toml` pins
+1.92.0.
 
 Confirm both deployable files exist and do not exceed the 64 KB (65,536 bytes) Soroban WASM size budget before proceeding:
 

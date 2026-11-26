@@ -42,8 +42,9 @@ echo "Admin address: ${ADMIN_ADDRESS:-<not-set>}"
 echo "Executor address: ${EXECUTOR_ADDRESS:-<not-set>}"
 
 echo "Step 1: Building Wasm artifacts..."
-cargo build --manifest-path contracts/creator-registry/Cargo.toml --target wasm32v1-none --release --locked
-cargo build --manifest-path contracts/donation/Cargo.toml --target wasm32v1-none --release --locked
+# The optimized build is what must be deployed: the raw cargo output exceeds
+# Soroban's 64 KB contract size limit.
+stellar contract build --optimize --locked
 
 REGISTRY_WASM="target/wasm32v1-none/release/creator_registry.wasm"
 DONATION_WASM="target/wasm32v1-none/release/donation.wasm"
