@@ -69,10 +69,16 @@ jobs:
             exit 1
           fi
 
+      # Run on the current stable toolchain, not the project's pin: cargo-audit
+      # raises its minimum Rust version independently of the contracts' pin,
+      # and `cargo install` inside the repo would otherwise pick up
+      # rust-toolchain.toml and fail to compile it. `+stable` bypasses the pin;
+      # `cargo audit` only reads Cargo.lock, so it does not need the pin either.
       - name: Security advisory scan
-        uses: rustsec/audit-check@v2.0.0
-        with:
-          token: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          rustup toolchain install stable --profile minimal
+          cargo +stable install cargo-audit --locked
+          cargo +stable audit
 
   backend:
     name: Backend (Node/Express)
