@@ -1,0 +1,8 @@
+[advisories]
+ignore = [
+  # crypto-bigint 0.5.5 (timing variability). Reached only via soroban-sdk's
+  # `testutils` feature -> soroban-env-host -> elliptic-curve, i.e. unit tests.
+  # Absent from the wasm32v1-none build graph, so it never ships in a contract.
+  # The fix needs soroban-sdk 30. Remove this entry when the SDK is upgraded.
+  "RUSTSEC-2026-0387",
+]
