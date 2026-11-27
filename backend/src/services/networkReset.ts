@@ -40,6 +40,19 @@ export interface NetworkResetState {
 /** DB row key for the last-seen ledger checkpoint. */
 export const LAST_SEEN_LEDGER_KEY = "soroban:lastSeenLedger";
 
+/**
+ * Default interval (in milliseconds) between full network reset checks (#491).
+ * Checking every 60s instead of every 5s poll reduces steady-state RPC and DB load by ~92%.
+ */
+export const DEFAULT_RESET_CHECK_INTERVAL_MS = 60_000;
+
+export interface NetworkResetCheckOptions {
+  /** If true, forces detection pass even if the cadence cooldown has not elapsed. */
+  force?: boolean;
+  /** Reuses an already-fetched latest ledger sequence instead of issuing an extra RPC call. */
+  latestLedger?: number;
+}
+
 const INITIAL_STATE: NetworkResetState = {
   status: "ok",
   reason: null,
@@ -54,6 +67,13 @@ class NetworkResetDetector {
   private state: NetworkResetState = { ...INITIAL_STATE };
   private pauseCallbacks: PauseCallback[] = [];
   private checking = false;
+  private lastCheckedAt = 0;
+  private checkIntervalMs = DEFAULT_RESET_CHECK_INTERVAL_MS;
+
+  /** Configures the minimum interval between automatic check passes (#491). */
+  setCheckIntervalMs(intervalMs: number): void {
+    this.checkIntervalMs = intervalMs;
+  }
 
   /** Registers a callback fired once when a reset is first detected. */
   onPause(callback: PauseCallback): void {
@@ -69,18 +89,38 @@ class NetworkResetDetector {
    * (including from an earlier pass). Safe to call from several pollers: an
    * in-flight check short-circuits concurrent callers, and RPC failure is
    * inconclusive rather than evidence of a reset.
+   *
+   * Optimizations (#491):
+   * - Throttles passes to `checkIntervalMs` (default 60s) unless `force: true`.
+   * - Reuses `options.latestLedger` when passed, avoiding extra `getLatestLedger` RPC calls.
+   * - Skips database writes if the ledger checkpoint has not advanced.
    */
-  async check(): Promise<boolean> {
+  async check(options?: NetworkResetCheckOptions | number): Promise<boolean> {
     if (this.state.status === "reset_detected") return true;
+
+    const opts: NetworkResetCheckOptions =
+      typeof options === "number" ? { latestLedger: options } : options ?? {};
+
+    const now = Date.now();
+    if (!opts.force && this.lastCheckedAt > 0 && now - this.lastCheckedAt < this.checkIntervalMs) {
+      return false;
+    }
+
     if (this.checking) return false;
     this.checking = true;
 
     try {
-      const { sequence } = await callSorobanRpc<{ sequence: number }>(
-        "getLatestLedger",
-        {},
-        { retries: 1 }
-      );
+      let sequence: number;
+      if (typeof opts.latestLedger === "number" && Number.isFinite(opts.latestLedger)) {
+        sequence = opts.latestLedger;
+      } else {
+        const res = await callSorobanRpc<{ sequence: number }>(
+          "getLatestLedger",
+          {},
+          { retries: 1 }
+        );
+        sequence = res.sequence;
+      }
 
       const stored = await this.readCheckpoint();
       if (stored != null && sequence < stored) {
@@ -112,8 +152,12 @@ class NetworkResetDetector {
         }
       }
 
-      // Healthy: advance the checkpoint so the next backwards jump is caught.
-      await this.writeCheckpoint(Math.max(stored ?? 0, sequence));
+      // Healthy: only advance DB checkpoint when sequence actually advanced (#491)
+      if (stored == null || sequence > stored) {
+        await this.writeCheckpoint(sequence);
+      }
+
+      this.lastCheckedAt = now;
       this.state = {
         ...this.state,
         status: "ok",
@@ -192,6 +236,8 @@ class NetworkResetDetector {
     this.state = { ...INITIAL_STATE };
     this.pauseCallbacks = [];
     this.checking = false;
+    this.lastCheckedAt = 0;
+    this.checkIntervalMs = DEFAULT_RESET_CHECK_INTERVAL_MS;
   }
 }
 

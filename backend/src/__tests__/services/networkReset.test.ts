@@ -159,4 +159,73 @@ describe("network reset detection (#278)", () => {
     });
     expect(networkReset.getState().status).toBe("ok");
   });
+
+  it("skips DB write when the checkpoint value is unchanged (#491)", async () => {
+    mockedCallRpc.mockResolvedValue({ sequence: 1000 });
+    mockedPrisma.networkCheckpoint.findUnique.mockResolvedValue({
+      key: LAST_SEEN_LEDGER_KEY,
+      value: "1000",
+    });
+
+    const detected = await networkReset.check();
+
+    expect(detected).toBe(false);
+    expect(networkReset.getState().status).toBe("ok");
+    expect(mockedPrisma.networkCheckpoint.upsert).not.toHaveBeenCalled();
+  });
+
+  it("reuses latestLedger without issuing an extra getLatestLedger RPC call (#491)", async () => {
+    mockedPrisma.networkCheckpoint.findUnique.mockResolvedValue({
+      key: LAST_SEEN_LEDGER_KEY,
+      value: "900",
+    });
+
+    const detected = await networkReset.check({ latestLedger: 1050 });
+
+    expect(detected).toBe(false);
+    expect(mockedCallRpc).not.toHaveBeenCalledWith(
+      "getLatestLedger",
+      expect.anything(),
+      expect.anything()
+    );
+    expect(mockedPrisma.networkCheckpoint.upsert).toHaveBeenCalledWith({
+      where: { key: LAST_SEEN_LEDGER_KEY },
+      update: { value: "1050" },
+      create: { key: LAST_SEEN_LEDGER_KEY, value: "1050" },
+    });
+  });
+
+  it("throttles checks on a slower cadence (skips RPC within interval) (#491)", async () => {
+    mockedCallRpc.mockResolvedValue({ sequence: 1000 });
+    mockedPrisma.networkCheckpoint.findUnique.mockResolvedValue({
+      key: LAST_SEEN_LEDGER_KEY,
+      value: "900",
+    });
+
+    // First call runs detection pass
+    const first = await networkReset.check();
+    expect(first).toBe(false);
+    expect(mockedCallRpc).toHaveBeenCalledTimes(1);
+
+    // Immediate second call within 60s is throttled
+    mockedCallRpc.mockClear();
+    const second = await networkReset.check();
+    expect(second).toBe(false);
+    expect(mockedCallRpc).not.toHaveBeenCalled();
+  });
+
+  it("detects reset within the new interval when forced or after cooldown (#491)", async () => {
+    mockedCallRpc.mockResolvedValue({ sequence: 1000 });
+    mockedPrisma.networkCheckpoint.findUnique.mockResolvedValue({
+      key: LAST_SEEN_LEDGER_KEY,
+      value: "900",
+    });
+    await networkReset.check();
+
+    // Forced check with backwards sequence triggers reset detection even within cooldown
+    mockedCallRpc.mockResolvedValue({ sequence: 400 });
+    const detected = await networkReset.check({ force: true });
+    expect(detected).toBe(true);
+    expect(networkReset.getState().status).toBe("reset_detected");
+  });
 });

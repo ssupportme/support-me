@@ -184,6 +184,7 @@ export class SorobanEventListener {
   private cursor: string | null | undefined = undefined;
   private timer: ReturnType<typeof setInterval> | null = null;
   private polling = false;
+  private lastKnownLedger: number | undefined = undefined;
 
   start(): void {
     if (!DONATION_CONTRACT_ID) {
@@ -219,6 +220,7 @@ export class SorobanEventListener {
    */
   async resetCursor(): Promise<void> {
     this.cursor = null;
+    this.lastKnownLedger = undefined;
     await this.clearStoredCursor();
     eventListenerHealth.setCursor(null);
     // A fresh chain after resync invalidates any prior out-of-retention gap
@@ -663,14 +665,19 @@ export class SorobanEventListener {
    * resync). Separate from the cursor-based call below because this one
    * always derives a fresh `startLedger` and never supplies a cursor.
    */
-  private async pollFromLookback(): Promise<{ events: RawEvent[] }> {
+  private async pollFromLookback(): Promise<{ events: RawEvent[]; latestLedger?: number }> {
     const { sequence: latestLedger } = await rpcCall<{ sequence: number }>(
       "getLatestLedger",
       {}
     );
+    this.lastKnownLedger = latestLedger;
     const params = this.buildEventsParams();
     params.startLedger = Math.max(latestLedger - LOOKBACK_LEDGERS, 1);
-    return rpcCall<{ events: RawEvent[] }>("getEvents", params);
+    const result = await rpcCall<{ events: RawEvent[]; latestLedger?: number }>("getEvents", params);
+    if (result.latestLedger != null) {
+      this.lastKnownLedger = result.latestLedger;
+    }
+    return result;
   }
 
   /**
@@ -681,7 +688,7 @@ export class SorobanEventListener {
    * so this records it on eventListenerHealth rather than pretending
    * nothing happened.
    */
-  private async recoverFromOutOfRetention(): Promise<{ events: RawEvent[] }> {
+  private async recoverFromOutOfRetention(): Promise<{ events: RawEvent[]; latestLedger?: number }> {
     const { oldestLedger } = await rpcCall<{ oldestLedger: number }>("getHealth", {});
     console.warn(
       `SorobanEventListener: stored cursor is outside the RPC's retention window; ` +
@@ -696,15 +703,23 @@ export class SorobanEventListener {
 
     const params = this.buildEventsParams();
     params.startLedger = oldestLedger;
-    return rpcCall<{ events: RawEvent[] }>("getEvents", params);
+    const result = await rpcCall<{ events: RawEvent[]; latestLedger?: number }>("getEvents", params);
+    if (result.latestLedger != null) {
+      this.lastKnownLedger = result.latestLedger;
+    }
+    return result;
   }
 
-  private async fetchNextPage(): Promise<{ events: RawEvent[] }> {
+  private async fetchNextPage(): Promise<{ events: RawEvent[]; latestLedger?: number }> {
     if (this.cursor) {
       const params = this.buildEventsParams();
       (params.pagination as Record<string, unknown>).cursor = this.cursor;
       try {
-        return await rpcCall<{ events: RawEvent[] }>("getEvents", params);
+        const result = await rpcCall<{ events: RawEvent[]; latestLedger?: number }>("getEvents", params);
+        if (result.latestLedger != null) {
+          this.lastKnownLedger = result.latestLedger;
+        }
+        return result;
       } catch (error) {
         if (!isOutOfRetentionError(error)) throw error;
         return this.recoverFromOutOfRetention();
@@ -721,10 +736,9 @@ export class SorobanEventListener {
     if (networkReset.getState().status === "reset_detected") return;
     this.polling = true;
     try {
-      // Run detection on the poll cadence as well: the executor only ticks
-      // once a minute, so this is what makes a reset visible "within one poll
-      // interval". check() is cheap and short-circuits once detected.
-      if (await networkReset.check()) return;
+      // Run detection on a throttled cadence and reuse the latestLedger
+      // already observed by the listener to eliminate extra RPC calls (#491).
+      if (await networkReset.check({ latestLedger: this.lastKnownLedger })) return;
 
       // Resume from the DB-persisted cursor (#268): `undefined` means this
       // process has not loaded it yet (fresh start or restart); `null` means
